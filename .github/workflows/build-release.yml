@@ -1,0 +1,59 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 生成版本信息
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" app.py
+
+      - name: PyInstaller 打包（目录版，供安装器使用）
+        run: pyinstaller --noconfirm --clean --onedir --windowed --name EdgeTTSGui --icon assets/app.ico app.py
+
+      - name: PyInstaller 打包（便携单文件版）
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name EdgeTTSGui-Portable --icon assets/app.ico app.py
+
+      - name: 安装 Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: 编译安装程序
+        shell: pwsh
+        run: |
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { $iscc = Get-ChildItem "C:\Program Files\Inno Setup*\ISCC.exe" | Select-Object -First 1 -ExpandProperty FullName }
+          & $iscc installer\EdgeTTSGui.iss
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/EdgeTTSGui/EdgeTTSGui.exe
+            dist/EdgeTTSGui-Portable.exe
+            dist/EdgeTTSGui-Setup.exe
+          generate_release_notes: true
