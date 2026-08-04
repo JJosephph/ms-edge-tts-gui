@@ -1,5 +1,13 @@
 # Release Notes
 
+## v1.0.3
+
+### Fixed
+
+- Standardized the Windows UI font to Microsoft YaHei UI for clear Chinese labels, controls, and logs.
+- Removed glyph-based button labels and replaced them with clear GitHub repository, GitHub Star, settings, theme, and language labels.
+- Fixed English activity-log localization and repaired the corrupted bilingual README navigation links.
+
 ## v1.0.2
 
 **Release date:** August 4, 2026

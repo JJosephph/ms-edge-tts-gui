@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="#????">????</a> ?
-  <a href="#english-guide">English guide</a> ?
-  <a href="#downloads">Downloads</a> ?
-  <a href="#network-and-proxy">Network & proxy</a> ?
+  <a href="#中文说明">中文说明</a> ·
+  <a href="#english-guide">English guide</a> ·
+  <a href="#downloads">Downloads</a> ·
+  <a href="#network-and-proxy">Network &amp; proxy</a> ·
   <a href="#build-and-release">Build</a>
 </p>
 

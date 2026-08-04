@@ -36,10 +36,11 @@ from tts_engine import (
 from text_utils import clean_text, default_filename, normalize_for_tts, preview_text
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 DEVELOPER = "WangYufan"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
+UI_FONT_FAMILY = "Microsoft YaHei UI"
 SETTINGS_DIR = Path(os.environ.get("APPDATA", Path.home())) / "EdgeTTSGui"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 PREVIEW_FILENAME = "edge_tts_preview.mp3"
@@ -83,6 +84,7 @@ CURATED_VOICES = [
     ("한국어 · SunHi", "ko-KR-SunHiNeural"),
 ]
 
+ctk.ThemeManager.theme["CTkFont"]["family"] = UI_FONT_FAMILY
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -136,13 +138,16 @@ class App(ctk.CTk):
         "app": {"zh": "Edge TTS 语音合成助手", "en": "Edge TTS Voice Studio"},
         "open": {"zh": "开源 · MIT License", "en": "Open Source · MIT License"},
         "open_badge": {"zh": "免费 · 开源", "en": "Free · Open Source"},
+        "github_repo": {"zh": "GitHub 仓库", "en": "GitHub"},
+        "github_star": {"zh": "GitHub 点赞", "en": "Star on GitHub"},
+        "settings_short": {"zh": "设置", "en": "Settings"},
         "repo": {"zh": "GitHub 仓库 ↗", "en": "GitHub Repo ↗"},
         "star": {"zh": "⭐ 去 GitHub 点 Star", "en": "⭐ Star on GitHub"},
         "developer": {"zh": "开发者", "en": "Developer"},
         "language": {"zh": "EN", "en": "中文"},
-        "settings": {"zh": "⚙ 设置", "en": "⚙ Settings"},
-        "theme_dark": {"zh": "☾ 夜间", "en": "☾ Dark"},
-        "theme_light": {"zh": "☀ 白天", "en": "☀ Light"},
+        "settings": {"zh": "设置", "en": "Settings"},
+        "theme_dark": {"zh": "夜间", "en": "Dark"},
+        "theme_light": {"zh": "白天", "en": "Light"},
         "tagline": {"zh": "让文字成为清晰、自然的声音", "en": "Turn text into clear, natural voice"},
         "voice_deck": {"zh": "VOICE DECK", "en": "VOICE DECK"},
         "composer": {"zh": "COMPOSER", "en": "COMPOSER"},
@@ -150,23 +155,23 @@ class App(ctk.CTk):
         "check_network": {"zh": "检测网络", "en": "Check network"},
         "network_ok": {"zh": "●  网络正常（{latency:.0f} ms）", "en": "●  Network OK ({latency:.0f} ms)"},
         "network_bad": {"zh": "●  网络异常", "en": "●  Network unavailable"},
-        "article": {"zh": "📄 文章内容", "en": "📄 Article"},
+        "article": {"zh": "文章内容", "en": "Article"},
         "count": {"zh": "字数：{count}", "en": "Characters: {count}"},
         "helper": {"zh": "支持 Markdown / 纯文本；试听只合成前 400 字。", "en": "Markdown and plain text supported; preview synthesizes the first 400 characters."},
-        "voice": {"zh": "🔊 语音", "en": "🔊 Voice"},
+        "voice": {"zh": "语音", "en": "Voice"},
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
         "original": {"zh": "原工作流默认：Andrew Multilingual · 语速 +0% · 音量 +0% · 音调 +0Hz", "en": "Original workflow: Andrew Multilingual · rate +0% · volume +0% · pitch +0Hz"},
-        "restore": {"zh": "↺ 恢复原工作流默认", "en": "↺ Restore workflow defaults"},
+        "restore": {"zh": "恢复原工作流默认", "en": "Restore workflow defaults"},
         "reset_compact": {"zh": "恢复", "en": "Reset"},
         "rate": {"zh": "语速", "en": "Rate"},
         "volume": {"zh": "音量", "en": "Volume"},
         "pitch": {"zh": "音调", "en": "Pitch"},
         "ready": {"zh": "就绪", "en": "Ready"},
-        "preview": {"zh": "▶ 试听", "en": "▶ Preview"},
-        "export": {"zh": "⬇ 导出音频", "en": "⬇ Export MP3"},
-        "stop": {"zh": "■ 停止", "en": "■ Stop"},
-        "log": {"zh": "📋 运行日志", "en": "📋 Activity log"},
-        "footer": {"zh": "🧡 开源软件 · MIT License · Powered by Microsoft Edge TTS", "en": "🧡 Open source · MIT License · Powered by Microsoft Edge TTS"},
+        "preview": {"zh": "试听", "en": "Preview"},
+        "export": {"zh": "导出音频", "en": "Export MP3"},
+        "stop": {"zh": "停止", "en": "Stop"},
+        "log": {"zh": "活动日志", "en": "Activity log"},
+        "footer": {"zh": "免费开源软件 · MIT License · Powered by Microsoft Edge TTS", "en": "Free open-source software · MIT License · Powered by Microsoft Edge TTS"},
         "repository": {"zh": "仓库：", "en": "Repo: "},
         "empty": {"zh": "请输入文章内容。", "en": "Please enter some article text."},
     }
@@ -286,7 +291,7 @@ class App(ctk.CTk):
         dialog.grab_set()
         dialog.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(dialog, text="Preview cache" if is_english else "试听缓存", font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(22, 4))
+        ctk.CTkLabel(dialog, text="Preview cache" if is_english else "试听缓存", font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(22, 4))
         hint = (
             "Preview uses one temporary MP3 only. It is overwritten each time and removed when the app closes."
             if is_english
@@ -343,6 +348,9 @@ class App(ctk.CTk):
         ctk.CTkButton(buttons, text="Open folder" if is_english else "打开目录", width=104, fg_color="#3a4358", hover_color="#4a546c", command=lambda: os.startfile(self._preview_dir)).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Clear preview cache" if is_english else "清理试听缓存", width=122, fg_color="#3a4358", hover_color="#4a546c", command=clear_preview).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Save" if is_english else "保存", width=86, command=save_directory).pack(side="left", padx=4)
+
+    def _font(self, size=13, weight="normal"):
+        return ctk.CTkFont(family=UI_FONT_FAMILY, size=size, weight=weight)
 
     def _c(self, key: str) -> str:
         return THEMES[self._theme][key]
@@ -404,36 +412,28 @@ class App(ctk.CTk):
         brand = ctk.CTkFrame(header, width=56, height=56, corner_radius=16, fg_color=self._c("primary"))
         brand.grid(row=0, column=0, rowspan=2, padx=(14, 10), pady=12)
         brand.grid_propagate(False)
-        ctk.CTkLabel(brand, text="♫", text_color="#FFFFFF", font=ctk.CTkFont(size=30, weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
-        ctk.CTkLabel(header, text=self._app_name(), text_color=self._c("text"), font=ctk.CTkFont(size=23, weight="bold")).grid(row=0, column=1, sticky="sw", pady=(13, 0))
-        ctk.CTkLabel(header, text=self._t("tagline"), text_color=self._c("muted"), font=ctk.CTkFont(size=12)).grid(row=1, column=1, sticky="nw", pady=(0, 13))
+        ctk.CTkLabel(brand, text="♫", text_color="#FFFFFF", font=self._font(size=30, weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(header, text=self._app_name(), text_color=self._c("text"), font=self._font(size=23, weight="bold")).grid(row=0, column=1, sticky="sw", pady=(13, 0))
+        ctk.CTkLabel(header, text=self._t("tagline"), text_color=self._c("muted"), font=self._font(size=12)).grid(row=1, column=1, sticky="nw", pady=(0, 13))
 
         controls = ctk.CTkFrame(header, fg_color="transparent")
         controls.grid(row=0, column=2, rowspan=2, sticky="e", padx=14, pady=12)
-        ctk.CTkLabel(
-            controls,
-            text=self._t("open_badge"),
-            height=30,
-            corner_radius=15,
-            fg_color=self._c("star"),
-            text_color=self._c("warning"),
-            font=ctk.CTkFont(size=11, weight="bold"),
-        ).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(controls, text="Repo", width=42, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
-        ctk.CTkButton(controls, text="Star", width=40, height=30, fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
-        ctk.CTkButton(controls, text="Set", width=36, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._show_settings).pack(side="left", padx=(6, 2))
+        ctk.CTkLabel(controls, text=self._t("open_badge"), width=98, height=30, corner_radius=15, fg_color=self._c("star"), text_color=self._c("warning"), font=self._font(size=12, weight="bold")).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(controls, text=self._t("github_repo"), width=92, height=30, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text=self._t("github_star"), width=104, height=30, font=self._font(size=12, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text=self._t("settings_short"), width=52, height=30, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._show_settings).pack(side="left", padx=(6, 2))
         theme_text = self._t("theme_dark") if self._theme == "dark" else self._t("theme_light")
-        ctk.CTkButton(controls, text=theme_text, width=62, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_theme).pack(side="left", padx=2)
-        ctk.CTkButton(controls, text=self._t("language"), width=40, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_language).pack(side="left", padx=(2, 0))
+        ctk.CTkButton(controls, text=theme_text, width=52, height=30, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_theme).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text=self._t("language"), width=40, height=30, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_language).pack(side="left", padx=(2, 0))
     def _badge(self, master, text, color):
-        return ctk.CTkLabel(master, text=text, text_color=color, font=ctk.CTkFont(size=12, weight="bold"))
+        return ctk.CTkLabel(master, text=text, text_color=color, font=self._font(size=12, weight="bold"))
 
     def _build_network_bar(self):
         bar = ctk.CTkFrame(self, corner_radius=14, fg_color=self._c("surface_alt"))
         bar.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 10))
         bar.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(bar, text="●", text_color=self._c("warning"), font=ctk.CTkFont(size=18)).grid(row=0, column=0, padx=(16, 6), pady=7)
-        self._net_dot = ctk.CTkLabel(bar, text=self._t("checking"), text_color=self._c("text"), font=ctk.CTkFont(size=13, weight="bold"))
+        ctk.CTkLabel(bar, text="●", text_color=self._c("warning"), font=self._font(size=18)).grid(row=0, column=0, padx=(16, 6), pady=7)
+        self._net_dot = ctk.CTkLabel(bar, text=self._t("checking"), text_color=self._c("text"), font=self._font(size=13, weight="bold"))
         self._net_dot.grid(row=0, column=1, sticky="w", pady=7)
         ctk.CTkButton(bar, text=self._t("check_network"), width=116, height=30, fg_color=self._c("card_raised"), hover_color=self._c("border"), text_color=self._c("accent"), command=self._on_check_network).grid(row=0, column=2, padx=10, pady=7)
 
@@ -448,31 +448,31 @@ class App(ctk.CTk):
         composer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         composer.grid_columnconfigure(0, weight=1)
         composer.grid_rowconfigure(2, weight=1)
-        ctk.CTkLabel(composer, text=self._t("composer"), text_color=self._c("accent"), font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
+        ctk.CTkLabel(composer, text=self._t("composer"), text_color=self._c("accent"), font=self._font(size=11, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
         title_row = ctk.CTkFrame(composer, fg_color="transparent")
         title_row.grid(row=1, column=0, sticky="ew", padx=18, pady=(2, 6))
-        ctk.CTkLabel(title_row, text=self._t("article"), text_color=self._c("text"), font=ctk.CTkFont(size=18, weight="bold")).pack(side="left")
-        self._char_count = ctk.CTkLabel(title_row, text=self._t("count", count=0), text_color=self._c("muted"), font=ctk.CTkFont(size=12))
+        ctk.CTkLabel(title_row, text=self._t("article"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).pack(side="left")
+        self._char_count = ctk.CTkLabel(title_row, text=self._t("count", count=0), text_color=self._c("muted"), font=self._font(size=12))
         self._char_count.pack(side="right")
-        self._textbox = ctk.CTkTextbox(composer, wrap="word", corner_radius=14, fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=ctk.CTkFont(size=14))
+        self._textbox = ctk.CTkTextbox(composer, wrap="word", corner_radius=14, fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=14))
         self._textbox.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 8))
         ctk.CTkLabel(composer, text=self._t("helper"), text_color=self._c("muted"), anchor="w").grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 14))
 
         deck = ctk.CTkFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
         deck.grid(row=0, column=1, sticky="ns")
         deck.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
-        self._voice_search = ctk.CTkEntry(deck, placeholder_text=self._t("search"), height=30, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), placeholder_text_color=self._c("muted"))
+        ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
+        self._voice_search = ctk.CTkEntry(deck, placeholder_text=self._t("search"), height=30, font=self._font(size=13), fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), placeholder_text_color=self._c("muted"))
         self._voice_search.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 4))
         self._voice_var = tk.StringVar(value=self._display_name(self._selected_voice_code))
-        self._voice_combo = ctk.CTkComboBox(deck, values=[self._display_name(code) for _, code in CURATED_VOICES], variable=self._voice_var, height=32, fg_color=self._c("field"), border_color=self._c("border"), button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), text_color=self._c("text"), dropdown_fg_color=self._c("surface"), dropdown_hover_color=self._c("card_raised"), command=self._on_voice_changed)
+        self._voice_combo = ctk.CTkComboBox(deck, values=[self._display_name(code) for _, code in CURATED_VOICES], variable=self._voice_var, height=32, fg_color=self._c("field"), border_color=self._c("border"), button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), text_color=self._c("text"), dropdown_fg_color=self._c("surface"), dropdown_hover_color=self._c("card_raised"), font=self._font(size=13), dropdown_font=self._font(size=13), command=self._on_voice_changed)
         self._voice_combo.grid(row=2, column=0, sticky="ew", padx=18)
         voice_details = ctk.CTkFrame(deck, fg_color="transparent")
         voice_details.grid(row=3, column=0, sticky="ew", padx=18, pady=(2, 5))
         voice_details.grid_columnconfigure(0, weight=1)
-        self._voice_info = ctk.CTkLabel(voice_details, text="", text_color=self._c("muted"), anchor="w", font=ctk.CTkFont(size=11))
+        self._voice_info = ctk.CTkLabel(voice_details, text="", text_color=self._c("muted"), anchor="w", font=self._font(size=11))
         self._voice_info.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(voice_details, text=self._t("reset_compact"), width=42, height=25, fg_color="transparent", border_width=1, border_color=self._c("border"), hover_color=self._c("card_raised"), text_color=self._c("muted"), command=self._restore_original_defaults).grid(row=0, column=1, padx=(6, 0))
+        ctk.CTkButton(voice_details, text=self._t("reset_compact"), width=42, height=25, font=self._font(size=11), fg_color="transparent", border_width=1, border_color=self._c("border"), hover_color=self._c("card_raised"), text_color=self._c("muted"), command=self._restore_original_defaults).grid(row=0, column=1, padx=(6, 0))
 
         parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
         parameters.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 7))
@@ -488,9 +488,9 @@ class App(ctk.CTk):
         status_row = ctk.CTkFrame(deck, fg_color="transparent")
         status_row.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 3))
         status_row.grid_columnconfigure(0, weight=1)
-        self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=ctk.CTkFont(size=12, weight="bold"))
+        self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=self._font(size=12, weight="bold"))
         self._status_label.grid(row=0, column=0, sticky="w")
-        self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
+        self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, font=self._font(size=11), fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
         self._btn_stop.grid(row=0, column=1, sticky="e")
         self._progress = ctk.CTkProgressBar(deck, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
         self._progress.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 7))
@@ -500,9 +500,9 @@ class App(ctk.CTk):
         actions.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 9))
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
-        self._btn_preview = ctk.CTkButton(actions, text=self._t("preview"), command=self._on_preview, height=34, fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
+        self._btn_preview = ctk.CTkButton(actions, text=self._t("preview"), command=self._on_preview, height=34, font=self._font(size=13, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
         self._btn_preview.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        self._btn_export = ctk.CTkButton(actions, text=self._t("export"), command=self._on_export, height=34, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
+        self._btn_export = ctk.CTkButton(actions, text=self._t("export"), command=self._on_export, height=34, font=self._font(size=13, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
         self._btn_export.grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self._update_voice_info()
 
@@ -510,8 +510,8 @@ class App(ctk.CTk):
         card = ctk.CTkFrame(master, fg_color="transparent")
         card.grid(row=0, column=column, sticky="ew", padx=6, pady=5)
         card.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(card, text=label, text_color=self._c("muted"), anchor="w", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, sticky="w")
-        value_label = ctk.CTkLabel(card, text=formatter(variable.get()), text_color=self._c("accent"), anchor="e", font=ctk.CTkFont(size=11, weight="bold"))
+        ctk.CTkLabel(card, text=label, text_color=self._c("muted"), anchor="w", font=self._font(size=11, weight="bold")).grid(row=0, column=0, sticky="w")
+        value_label = ctk.CTkLabel(card, text=formatter(variable.get()), text_color=self._c("accent"), anchor="e", font=self._font(size=11, weight="bold"))
         value_label.grid(row=1, column=0, sticky="ew", pady=(1, 1))
         slider = ctk.CTkSlider(card, height=14, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=lambda value: value_label.configure(text=formatter(value)))
         slider.grid(row=2, column=0, sticky="ew")
@@ -529,8 +529,8 @@ class App(ctk.CTk):
         log_frame = ctk.CTkFrame(self, corner_radius=18, fg_color=self._c("surface"), border_width=1, border_color=self._c("border"))
         log_frame.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 8))
         log_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(log_frame, text=self._t("log"), text_color=self._c("text"), font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=16, pady=(9, 2))
-        self._log = ctk.CTkTextbox(log_frame, height=72, corner_radius=12, fg_color=self._c("log"), text_color=self._c("text"), border_width=0, font=ctk.CTkFont(size=12))
+        ctk.CTkLabel(log_frame, text=self._t("log"), text_color=self._c("text"), font=self._font(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=16, pady=(9, 2))
+        self._log = ctk.CTkTextbox(log_frame, height=72, corner_radius=12, fg_color=self._c("log"), text_color=self._c("text"), border_width=0, font=self._font(size=12))
         self._log.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
         self._log.configure(state="disabled")
 
@@ -538,8 +538,8 @@ class App(ctk.CTk):
         footer = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         footer.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 10))
         footer.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(footer, text=self._t("footer"), text_color=self._c("muted"), font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(footer, text=f"{self._t('developer')} · {DEVELOPER}  |  {REPOSITORY_DISPLAY}", text_color=self._c("muted"), font=ctk.CTkFont(size=11)).grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(footer, text=self._t("footer"), text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(footer, text=f"{self._t('developer')} · {DEVELOPER}  |  {REPOSITORY_DISPLAY}", text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=1, sticky="e")
 
     # ============================================================ 事件绑定
 
@@ -622,13 +622,13 @@ class App(ctk.CTk):
     def _apply_network_result(self, result: ProbeResult):
         if result.reachable:
             self._net_dot.configure(
-                text=f"●  网络正常（{result.latency_ms:.0f} ms）", text_color="#9ece6a"
+                text=self._t("network_ok", latency=result.latency_ms), text_color="#9ece6a"
             )
             proxy = result.proxy or detect_proxy()
             note = f"（代理：{proxy}）" if proxy else ""
             self.log(f"网络检测通过{note}")
         else:
-            self._net_dot.configure(text="●  网络异常", text_color="#f7768e")
+            self._net_dot.configure(text=self._t("network_bad"), text_color="#f7768e")
             if result.proxy:
                 self.log(
                     f"[网络] 不可达，检测到代理 {result.proxy}，"
@@ -886,6 +886,10 @@ class App(ctk.CTk):
         }
         if message in exact:
             return exact[message]
+        proxy_match = re.fullmatch(r"\u7f51\u7edc\u68c0\u6d4b\u901a\u8fc7\uff08\u4ee3\u7406\uff1a(.*)\uff09", message)
+        if proxy_match:
+            return f"Network check passed (proxy: {proxy_match.group(1)})."
+
         substitutions = [
             (r"^\[语音\] 已加载 (\d+) 个可用语音$", r"[Voice] Loaded \1 available voices"),
             (r"^\[语音\] 加载语音列表失败：(.*)$", r"[Voice] Could not load voice list: \1"),
@@ -929,7 +933,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             dialog,
             text="Generation appears stalled" if is_english else "生成似乎卡住了",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=self._font(size=18, weight="bold"),
             text_color="#e0af68",
         ).pack(pady=(22, 6))
 
@@ -970,7 +974,7 @@ class App(ctk.CTk):
 
     def log(self, message: str):
         timestamp = datetime.now().strftime("%H:%M:%S")
-        line = f"[{timestamp}] {message}\n"
+        line = f"[{timestamp}] {self._localized_log_message(message)}\n"
         self._log.configure(state="normal")
         self._log.insert("end", line)
         self._log.see("end")
