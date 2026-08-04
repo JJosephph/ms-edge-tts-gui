@@ -36,7 +36,7 @@ from tts_engine import (
 from text_utils import clean_text, default_filename, normalize_for_tts, preview_text
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 DEVELOPER = "WangYufan"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
@@ -135,6 +135,7 @@ class App(ctk.CTk):
     TRANSLATIONS = {
         "app": {"zh": "Edge TTS 语音合成助手", "en": "Edge TTS Voice Studio"},
         "open": {"zh": "开源 · MIT License", "en": "Open Source · MIT License"},
+        "open_badge": {"zh": "免费 · 开源", "en": "Free · Open Source"},
         "repo": {"zh": "GitHub 仓库 ↗", "en": "GitHub Repo ↗"},
         "star": {"zh": "⭐ 去 GitHub 点 Star", "en": "⭐ Star on GitHub"},
         "developer": {"zh": "开发者", "en": "Developer"},
@@ -156,6 +157,7 @@ class App(ctk.CTk):
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
         "original": {"zh": "原工作流默认：Andrew Multilingual · 语速 +0% · 音量 +0% · 音调 +0Hz", "en": "Original workflow: Andrew Multilingual · rate +0% · volume +0% · pitch +0Hz"},
         "restore": {"zh": "↺ 恢复原工作流默认", "en": "↺ Restore workflow defaults"},
+        "reset_compact": {"zh": "恢复", "en": "Reset"},
         "rate": {"zh": "语速", "en": "Rate"},
         "volume": {"zh": "音量", "en": "Volume"},
         "pitch": {"zh": "音调", "en": "Pitch"},
@@ -408,13 +410,21 @@ class App(ctk.CTk):
 
         controls = ctk.CTkFrame(header, fg_color="transparent")
         controls.grid(row=0, column=2, rowspan=2, sticky="e", padx=14, pady=12)
-        ctk.CTkButton(controls, text="↗", width=34, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
-        ctk.CTkButton(controls, text="☆", width=34, height=30, fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
-        ctk.CTkButton(controls, text="⚙", width=36, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._show_settings).pack(side="left", padx=(6, 2))
-        theme_text = "☀" if self._theme == "dark" else "☾"
-        ctk.CTkButton(controls, text=theme_text, width=36, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_theme).pack(side="left", padx=2)
+        ctk.CTkLabel(
+            controls,
+            text=self._t("open_badge"),
+            height=30,
+            corner_radius=15,
+            fg_color=self._c("star"),
+            text_color=self._c("warning"),
+            font=ctk.CTkFont(size=11, weight="bold"),
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(controls, text="Repo", width=42, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text="Star", width=40, height=30, fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
+        ctk.CTkButton(controls, text="Set", width=36, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._show_settings).pack(side="left", padx=(6, 2))
+        theme_text = self._t("theme_dark") if self._theme == "dark" else self._t("theme_light")
+        ctk.CTkButton(controls, text=theme_text, width=62, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_theme).pack(side="left", padx=2)
         ctk.CTkButton(controls, text=self._t("language"), width=40, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_language).pack(side="left", padx=(2, 0))
-
     def _badge(self, master, text, color):
         return ctk.CTkLabel(master, text=text, text_color=color, font=ctk.CTkFont(size=12, weight="bold"))
 
@@ -451,50 +461,60 @@ class App(ctk.CTk):
         deck = ctk.CTkFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
         deck.grid(row=0, column=1, sticky="ns")
         deck.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(deck, text=self._t("voice_deck"), text_color=self._c("accent"), font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
-        ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=ctk.CTkFont(size=18, weight="bold")).grid(row=1, column=0, sticky="w", padx=18, pady=(2, 5))
-        self._voice_search = ctk.CTkEntry(deck, placeholder_text=self._t("search"), height=32, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), placeholder_text_color=self._c("muted"))
-        self._voice_search.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 6))
+        ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=ctk.CTkFont(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
+        self._voice_search = ctk.CTkEntry(deck, placeholder_text=self._t("search"), height=30, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), placeholder_text_color=self._c("muted"))
+        self._voice_search.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 4))
         self._voice_var = tk.StringVar(value=self._display_name(self._selected_voice_code))
-        self._voice_combo = ctk.CTkComboBox(deck, values=[self._display_name(code) for _, code in CURATED_VOICES], variable=self._voice_var, height=34, fg_color=self._c("field"), border_color=self._c("border"), button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), text_color=self._c("text"), dropdown_fg_color=self._c("surface"), dropdown_hover_color=self._c("card_raised"), command=self._on_voice_changed)
-        self._voice_combo.grid(row=3, column=0, sticky="ew", padx=18)
-        self._voice_info = ctk.CTkLabel(deck, text="", text_color=self._c("muted"), anchor="w", font=ctk.CTkFont(size=12))
-        self._voice_info.grid(row=4, column=0, sticky="ew", padx=18, pady=(4, 8))
-        ctk.CTkButton(deck, text=self._t("restore"), height=28, fg_color="transparent", border_width=1, border_color=self._c("border"), hover_color=self._c("card_raised"), text_color=self._c("muted"), command=self._restore_original_defaults).grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 10))
+        self._voice_combo = ctk.CTkComboBox(deck, values=[self._display_name(code) for _, code in CURATED_VOICES], variable=self._voice_var, height=32, fg_color=self._c("field"), border_color=self._c("border"), button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), text_color=self._c("text"), dropdown_fg_color=self._c("surface"), dropdown_hover_color=self._c("card_raised"), command=self._on_voice_changed)
+        self._voice_combo.grid(row=2, column=0, sticky="ew", padx=18)
+        voice_details = ctk.CTkFrame(deck, fg_color="transparent")
+        voice_details.grid(row=3, column=0, sticky="ew", padx=18, pady=(2, 5))
+        voice_details.grid_columnconfigure(0, weight=1)
+        self._voice_info = ctk.CTkLabel(voice_details, text="", text_color=self._c("muted"), anchor="w", font=ctk.CTkFont(size=11))
+        self._voice_info.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(voice_details, text=self._t("reset_compact"), width=42, height=25, fg_color="transparent", border_width=1, border_color=self._c("border"), hover_color=self._c("card_raised"), text_color=self._c("muted"), command=self._restore_original_defaults).grid(row=0, column=1, padx=(6, 0))
 
-        actions = ctk.CTkFrame(deck, fg_color="transparent")
-        actions.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 10))
-        actions.grid_columnconfigure(0, weight=1)
-        actions.grid_columnconfigure(1, weight=1)
-        self._btn_preview = ctk.CTkButton(actions, text=self._t("preview"), command=self._on_preview, height=40, fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
-        self._btn_preview.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        self._btn_export = ctk.CTkButton(actions, text=self._t("export"), command=self._on_export, height=40, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
-        self._btn_export.grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        self._btn_stop = ctk.CTkButton(deck, text=self._t("stop"), command=self._on_stop, height=28, fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
-        self._btn_stop.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 8))
-
+        parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
+        parameters.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 7))
+        for column in range(3):
+            parameters.grid_columnconfigure(column, weight=1, uniform="voice_control")
         self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
         self._volume_var = tk.IntVar(value=getattr(self, "_volume_value", DEFAULT_VOLUME))
         self._pitch_var = tk.IntVar(value=getattr(self, "_pitch_value", DEFAULT_PITCH))
-        self._add_slider(deck, 8, self._t("rate"), self._rate_var, -50, 100, self._fmt_rate)
-        self._add_slider(deck, 10, self._t("volume"), self._volume_var, -50, 100, self._fmt_volume)
-        self._add_slider(deck, 12, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch)
-        self._status_label = ctk.CTkLabel(deck, text=self._t("ready"), text_color=self._c("success"), font=ctk.CTkFont(size=12, weight="bold"))
-        self._status_label.grid(row=14, column=0, sticky="w", padx=18, pady=(10, 4))
-        self._progress = ctk.CTkProgressBar(deck, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
-        self._progress.grid(row=15, column=0, sticky="ew", padx=18, pady=(0, 16))
+        self._add_slider_card(parameters, 0, self._t("rate"), self._rate_var, -50, 100, self._fmt_rate)
+        self._add_slider_card(parameters, 1, self._t("volume"), self._volume_var, -50, 100, self._fmt_volume)
+        self._add_slider_card(parameters, 2, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch)
+
+        status_row = ctk.CTkFrame(deck, fg_color="transparent")
+        status_row.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 3))
+        status_row.grid_columnconfigure(0, weight=1)
+        self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=ctk.CTkFont(size=12, weight="bold"))
+        self._status_label.grid(row=0, column=0, sticky="w")
+        self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
+        self._btn_stop.grid(row=0, column=1, sticky="e")
+        self._progress = ctk.CTkProgressBar(deck, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
+        self._progress.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 7))
         self._progress.set(0)
+
+        actions = ctk.CTkFrame(deck, fg_color="transparent")
+        actions.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 9))
+        actions.grid_columnconfigure(0, weight=1)
+        actions.grid_columnconfigure(1, weight=1)
+        self._btn_preview = ctk.CTkButton(actions, text=self._t("preview"), command=self._on_preview, height=34, fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
+        self._btn_preview.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self._btn_export = ctk.CTkButton(actions, text=self._t("export"), command=self._on_export, height=34, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
+        self._btn_export.grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self._update_voice_info()
 
-    def _add_slider(self, master, row, label, variable, minimum, maximum, formatter):
-        row_frame = ctk.CTkFrame(master, fg_color="transparent")
-        row_frame.grid(row=row, column=0, sticky="ew", padx=18, pady=(4, 0))
-        row_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(row_frame, text=label, text_color=self._c("text"), width=54, anchor="w", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, sticky="w")
-        value_label = ctk.CTkLabel(row_frame, text=formatter(variable.get()), text_color=self._c("accent"), width=58, anchor="e", font=ctk.CTkFont(size=12))
-        value_label.grid(row=0, column=1, sticky="e")
-        slider = ctk.CTkSlider(row_frame, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=lambda value: value_label.configure(text=formatter(value)))
-        slider.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(1, 0))
+    def _add_slider_card(self, master, column, label, variable, minimum, maximum, formatter):
+        card = ctk.CTkFrame(master, fg_color="transparent")
+        card.grid(row=0, column=column, sticky="ew", padx=6, pady=5)
+        card.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(card, text=label, text_color=self._c("muted"), anchor="w", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, sticky="w")
+        value_label = ctk.CTkLabel(card, text=formatter(variable.get()), text_color=self._c("accent"), anchor="e", font=ctk.CTkFont(size=11, weight="bold"))
+        value_label.grid(row=1, column=0, sticky="ew", pady=(1, 1))
+        slider = ctk.CTkSlider(card, height=14, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=lambda value: value_label.configure(text=formatter(value)))
+        slider.grid(row=2, column=0, sticky="ew")
 
     def _fmt_rate(self, value):
         return f"{'+' if value >= 0 else ''}{int(value)}%"
@@ -510,7 +530,7 @@ class App(ctk.CTk):
         log_frame.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 8))
         log_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(log_frame, text=self._t("log"), text_color=self._c("text"), font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=16, pady=(9, 2))
-        self._log = ctk.CTkTextbox(log_frame, height=90, corner_radius=12, fg_color=self._c("log"), text_color=self._c("text"), border_width=0, font=ctk.CTkFont(size=12))
+        self._log = ctk.CTkTextbox(log_frame, height=72, corner_radius=12, fg_color=self._c("log"), text_color=self._c("text"), border_width=0, font=ctk.CTkFont(size=12))
         self._log.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
         self._log.configure(state="disabled")
 

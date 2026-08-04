@@ -2,34 +2,31 @@
   <rect width="1200" height="760" fill="#EEF3FA"/>
   <rect x="24" y="22" width="1152" height="82" rx="20" fill="#FFFFFF" stroke="#CAD8EB"/>
   <rect x="44" y="38" width="48" height="48" rx="15" fill="#356FEB"/>
-  <text x="68" y="72" text-anchor="middle" font-family="Segoe UI, Arial" font-size="27" font-weight="700" fill="#fff">♫</text>
+  <text x="68" y="72" text-anchor="middle" font-family="Segoe UI, Arial" font-size="26" font-weight="700" fill="#fff">TTS</text>
   <text x="112" y="61" font-family="Segoe UI, Arial" font-size="25" font-weight="700" fill="#17233A">Edge TTS Voice Studio</text>
   <text x="112" y="84" font-family="Segoe UI, Arial" font-size="13" fill="#61718D">Turn text into clear, natural voice</text>
-  <text x="795" y="68" font-family="Segoe UI, Arial" font-size="13" font-weight="700" fill="#168B57">OPEN SOURCE · MIT</text>
-  <rect x="950" y="46" width="42" height="32" rx="8" fill="#F8FBFF" stroke="#CAD8EB"/><text x="971" y="67" text-anchor="middle" font-family="Segoe UI" font-size="17" fill="#0B89C8">↗</text>
-  <rect x="1002" y="46" width="42" height="32" rx="8" fill="#4A3B16" stroke="#F6C66C"/><text x="1023" y="68" text-anchor="middle" font-family="Segoe UI" font-size="18" fill="#F6C66C">☆</text>
-  <rect x="1054" y="46" width="42" height="32" rx="8" fill="#F8FBFF"/><text x="1075" y="68" text-anchor="middle" font-family="Segoe UI" font-size="17" fill="#17233A">⚙</text>
-  <rect x="1106" y="46" width="42" height="32" rx="8" fill="#F8FBFF"/><text x="1127" y="68" text-anchor="middle" font-family="Segoe UI" font-size="14" fill="#17233A">EN</text>
+  <rect x="770" y="46" width="140" height="32" rx="16" fill="#FFF3D6"/><text x="840" y="67" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" font-weight="700" fill="#A66A00">FREE · OPEN SOURCE</text>
+  <rect x="920" y="46" width="48" height="32" rx="8" fill="#F8FBFF" stroke="#CAD8EB"/><text x="944" y="67" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#0B89C8">Repo</text>
+  <rect x="976" y="46" width="48" height="32" rx="8" fill="#FFF3D6" stroke="#A66A00"/><text x="1000" y="67" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#A66A00">Star</text>
+  <rect x="1032" y="46" width="54" height="32" rx="8" fill="#F8FBFF"/><text x="1059" y="67" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#17233A">Set</text>
+  <rect x="1094" y="46" width="54" height="32" rx="8" fill="#F8FBFF"/><text x="1121" y="67" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#17233A">EN</text>
   <rect x="24" y="118" width="1152" height="48" rx="15" fill="#FFFFFF"/><circle cx="52" cy="142" r="6" fill="#168B57"/><text x="68" y="147" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="#17233A">Network ready · 218 ms</text>
-  <rect x="24" y="180" width="724" height="446" rx="22" fill="#FFFFFF" stroke="#CAD8EB"/>
+  <rect x="24" y="180" width="724" height="394" rx="22" fill="#FFFFFF" stroke="#CAD8EB"/>
   <text x="48" y="212" font-family="Segoe UI, Arial" font-size="11" font-weight="700" fill="#0B89C8">COMPOSER</text>
-  <text x="48" y="246" font-family="Segoe UI, Arial" font-size="20" font-weight="700" fill="#17233A">Article</text>
-  <text x="690" y="246" text-anchor="end" font-family="Segoe UI, Arial" font-size="12" fill="#61718D">Characters: 0</text>
-  <rect x="48" y="264" width="676" height="300" rx="15" fill="#F8FBFF" stroke="#CAD8EB"/>
-  <text x="48" y="596" font-family="Segoe UI, Arial" font-size="13" fill="#61718D">Markdown and plain text supported · Preview synthesizes the first 400 characters.</text>
-  <rect x="762" y="180" width="414" height="446" rx="22" fill="#F7FAFF" stroke="#CAD8EB"/>
-  <text x="786" y="212" font-family="Segoe UI, Arial" font-size="11" font-weight="700" fill="#0B89C8">VOICE DECK</text>
-  <text x="786" y="246" font-family="Segoe UI, Arial" font-size="20" font-weight="700" fill="#17233A">Voice</text>
-  <rect x="786" y="264" width="366" height="36" rx="9" fill="#F8FBFF" stroke="#CAD8EB"/><text x="800" y="287" font-family="Segoe UI, Arial" font-size="13" fill="#61718D">Search voices, e.g. Xiaoxiao / Andrew…</text>
-  <rect x="786" y="310" width="366" height="38" rx="9" fill="#F8FBFF" stroke="#CAD8EB"/><text x="800" y="335" font-family="Segoe UI, Arial" font-size="13" font-weight="700" fill="#17233A">Recommended · Original workflow (Andrew)</text>
-  <rect x="786" y="366" width="366" height="34" rx="8" fill="#F8FBFF" stroke="#CAD8EB"/><text x="969" y="388" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#61718D">↺ Restore workflow defaults</text>
-  <rect x="786" y="414" width="176" height="44" rx="10" fill="#F8FBFF"/><text x="874" y="442" text-anchor="middle" font-family="Segoe UI, Arial" font-size="15" font-weight="700" fill="#17233A">▶ Preview</text>
-  <rect x="972" y="414" width="180" height="44" rx="10" fill="#356FEB"/><text x="1062" y="442" text-anchor="middle" font-family="Segoe UI, Arial" font-size="15" font-weight="700" fill="#fff">↓ Export MP3</text>
-  <text x="786" y="494" font-family="Segoe UI, Arial" font-size="13" font-weight="700" fill="#17233A">Rate</text><text x="1148" y="494" text-anchor="end" font-family="Segoe UI, Arial" font-size="13" fill="#0B89C8">+0%</text>
-  <line x1="786" y1="516" x2="1152" y2="516" stroke="#CAD8EB" stroke-width="6" stroke-linecap="round"/><circle cx="970" cy="516" r="9" fill="#356FEB"/>
-  <text x="786" y="552" font-family="Segoe UI, Arial" font-size="13" font-weight="700" fill="#17233A">Volume</text><text x="1148" y="552" text-anchor="end" font-family="Segoe UI, Arial" font-size="13" fill="#0B89C8">+0%</text>
-  <line x1="786" y1="574" x2="1152" y2="574" stroke="#CAD8EB" stroke-width="6" stroke-linecap="round"/><circle cx="970" cy="574" r="9" fill="#356FEB"/>
-  <rect x="24" y="640" width="1152" height="92" rx="18" fill="#FFFFFF" stroke="#CAD8EB"/>
-  <text x="48" y="669" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="#17233A">Activity log</text>
-  <rect x="48" y="680" width="1104" height="34" rx="8" fill="#F8FBFF"/>
+  <text x="48" y="246" font-family="Segoe UI, Arial" font-size="20" font-weight="700" fill="#17233A">Article</text><text x="692" y="246" text-anchor="end" font-family="Segoe UI, Arial" font-size="12" fill="#61718D">Characters: 1,286</text>
+  <rect x="48" y="264" width="676" height="250" rx="15" fill="#F8FBFF" stroke="#CAD8EB"/><text x="48" y="546" font-family="Segoe UI, Arial" font-size="13" fill="#61718D">Markdown and plain text supported · Preview synthesizes the first 400 characters.</text>
+  <rect x="762" y="180" width="414" height="394" rx="22" fill="#FFFFFF" stroke="#CAD8EB"/>
+  <text x="786" y="212" font-family="Segoe UI, Arial" font-size="11" font-weight="700" fill="#0B89C8">VOICE DECK</text><text x="786" y="246" font-family="Segoe UI, Arial" font-size="20" font-weight="700" fill="#17233A">Voice</text>
+  <rect x="786" y="264" width="366" height="30" rx="8" fill="#F8FBFF" stroke="#CAD8EB"/><text x="800" y="284" font-family="Segoe UI, Arial" font-size="12" fill="#61718D">Search voices, e.g. Xiaoxiao / Andrew</text>
+  <rect x="786" y="302" width="366" height="32" rx="8" fill="#F8FBFF" stroke="#CAD8EB"/><text x="800" y="324" font-family="Segoe UI, Arial" font-size="12" font-weight="700" fill="#17233A">Recommended · Original workflow (Andrew)</text>
+  <text x="786" y="353" font-family="Segoe UI, Arial" font-size="11" fill="#61718D">English (United States) · Male</text><rect x="1102" y="338" width="50" height="24" rx="7" fill="#F8FBFF" stroke="#CAD8EB"/><text x="1127" y="355" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#61718D">Reset</text>
+  <rect x="786" y="372" width="366" height="77" rx="12" fill="#E6EEF9"/>
+  <g font-family="Segoe UI, Arial"><text x="800" y="393" font-size="11" font-weight="700" fill="#61718D">Rate</text><text x="800" y="411" font-size="12" font-weight="700" fill="#0B89C8">+0%</text><line x1="800" y1="431" x2="900" y2="431" stroke="#CAD8EB" stroke-width="5" stroke-linecap="round"/><circle cx="850" cy="431" r="7" fill="#356FEB"/>
+  <text x="920" y="393" font-size="11" font-weight="700" fill="#61718D">Volume</text><text x="920" y="411" font-size="12" font-weight="700" fill="#0B89C8">+0%</text><line x1="920" y1="431" x2="1020" y2="431" stroke="#CAD8EB" stroke-width="5" stroke-linecap="round"/><circle cx="970" cy="431" r="7" fill="#356FEB"/>
+  <text x="1040" y="393" font-size="11" font-weight="700" fill="#61718D">Pitch</text><text x="1040" y="411" font-size="12" font-weight="700" fill="#0B89C8">+0Hz</text><line x1="1040" y1="431" x2="1140" y2="431" stroke="#CAD8EB" stroke-width="5" stroke-linecap="round"/><circle cx="1090" cy="431" r="7" fill="#356FEB"/></g>
+  <text x="786" y="470" font-family="Segoe UI, Arial" font-size="12" font-weight="700" fill="#168B57">Synthesizing · 42% · 1.2 MB received</text><rect x="786" y="480" width="366" height="8" rx="4" fill="#CAD8EB"/><rect x="786" y="480" width="152" height="8" rx="4" fill="#356FEB"/>
+  <rect x="786" y="502" width="176" height="38" rx="10" fill="#E6EEF9"/><text x="874" y="527" text-anchor="middle" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="#17233A">Preview</text>
+  <rect x="972" y="502" width="180" height="38" rx="10" fill="#356FEB"/><text x="1062" y="527" text-anchor="middle" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="#fff">Export MP3</text>
+  <text x="969" y="560" text-anchor="middle" font-family="Segoe UI, Arial" font-size="12" fill="#C33D56">Stop generation</text>
+  <rect x="24" y="590" width="1152" height="142" rx="18" fill="#FFFFFF" stroke="#CAD8EB"/><text x="48" y="620" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="#17233A">Activity log</text><rect x="48" y="632" width="1104" height="80" rx="10" fill="#F8FBFF"/><text x="66" y="660" font-family="Segoe UI, Arial" font-size="12" fill="#61718D">[Export] Streaming audio data and updating progress.</text>
 </svg>

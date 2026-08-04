@@ -1,5 +1,17 @@
 # Release Notes
 
+## v1.0.2
+
+**Release date:** August 4, 2026
+
+### Fixed and improved
+
+- Reworked the Voice Deck so **rate, volume, and pitch** display together in a compact row at normal window sizes.
+- Moved the shared **Preview / Export progress status and progress bar** above the action buttons so both are always visible during synthesis.
+- Restored a visible upper-right **Free · Open Source / 免费 · 开源** badge alongside repository controls.
+- Added a Chinese interface preview and a Chinese quick-start section to the bilingual README.
+- Updated the public GitHub repository description to serve both Chinese and English users.
+
 ## v1.0.1
 
 **Release date:** August 4, 2026

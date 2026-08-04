@@ -1,4 +1,4 @@
-# Edge TTS Voice Studio
+# Edge TTS Voice Studio / Edge TTS 语音合成助手
 
 <p align="center">
   <strong>Turn text into clear, natural voice.</strong><br>
@@ -14,16 +14,42 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#features">Features</a> ·
-  <a href="#downloads">Downloads</a> ·
-  <a href="#network-and-proxy">Network & proxy</a> ·
+  <a href="#????">????</a> ?
+  <a href="#english-guide">English guide</a> ?
+  <a href="#downloads">Downloads</a> ?
+  <a href="#network-and-proxy">Network & proxy</a> ?
   <a href="#build-and-release">Build</a>
 </p>
 
 ---
 
-## Overview
+## 中文说明
+
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。界面可随时切换中文和 English，适合全世界用户。
+
+- **试听与导出**：试听首 400 字，或导出完整 MP3。
+- **实时进度**：试听和导出都显示近似 `0–100%` 合成进度。
+- **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
+- **语音库**：支持 Microsoft Edge 大量声音，中文模式会翻译语言、地区和性别标签。
+- **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；另有推荐中文女声 `zh-CN-XiaoxiaoNeural`。
+- **不占空间**：试听只重复使用一个临时 MP3，可选目录、打开或清理，并在关闭软件时自动删除。
+
+### 中文界面预览
+
+<p align="center">
+  <img src="assets/ui-preview-zh.png" alt="中文界面预览" width="900">
+</p>
+
+### 下载与使用
+
+1. 在 [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) 下载 `EdgeTTSGui-Setup.exe`，安装时可选任意磁盘或文件夹。
+2. 安装包与便携版 EXE 均已内置 Python 运行环境，Windows 10 及更高版本无需另行安装 Python。
+3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，先点“试听”，确认后点“导出音频”。
+
+---
+
+## English Guide
+
 
 **Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**.
 
