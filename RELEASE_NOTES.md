@@ -1,30 +1,33 @@
-# 发布说明（Release Notes）
+# Release Notes
+
+## v1.0.1
+
+**Release date:** August 4, 2026
+
+### New and improved
+
+- Redesigned the desktop UI into a distinct **Composer + Voice Deck** workspace.
+- Added **day** and **night** themes, persisted in local settings.
+- Added **中文 / English** UI switching; English mode now localizes the Activity log and stalled-generation dialog.
+- Added real, approximate `0–100%` generation progress for both **Preview** and **Export MP3**.
+- Added Chinese labels for the currently loaded Edge voice catalog: voice name, locale, and gender.
+- Added preview cache settings: choose a folder, open it, clear it, automatically overwrite one temporary preview MP3, and delete it when the app closes.
+- Restored explicit compatibility defaults for the existing RPA workflow:
+  - `en-US-AndrewMultilingualNeural`
+  - rate `+0%`, volume `+0%`, pitch `+0Hz`
+- Added a recommended Chinese female voice entry: `zh-CN-XiaoxiaoNeural`.
+- Reworked README into a complete open-source project homepage with interface previews, downloads, privacy notes, build steps, and release guidance.
 
 ## v1.0.0
 
-**发布日期**：2026-08-04
+**Release date:** August 4, 2026
 
-首个正式版本发布 🎉
+Initial public release.
 
-### ✨ 新功能
+### Included
 
-- 现代深色 GUI：文章输入、语音选择、参数调节一屏完成
-- 一键试听（前 400 字）与全文导出 MP3
-- Daily Manna RPA 原工作流默认：Andrew Multilingual、语速 / 音量 / 音调均为 0；另提供推荐中文女声「晓晓」
-- 中英文界面一键切换，支持英文文章、英文语音与 English UI
-- 操作按钮固定在语音选择下方，小尺寸窗口也始终可见
-- 400+ Edge 语音库，支持搜索、语速 / 音量 / 音调调节
-- 网络检测：启动自动探测 Edge TTS 服务连通性，顶部指示灯实时显示状态
-- 卡住检测：连续 15 秒无音频数据自动弹窗，提示网络/代理问题并提供「重试 / 取消 / 继续等待」
-- 自动重试机制（最多 3 次）与错误分类提示
-
-### 🧡 开源信息
-
-- 开源协议：MIT License
-- 开发者：WangYufan
-- 仓库：[https://github.com/JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui)
-
-### 🛠️ 技术栈
-
-- Python 3.10+ / CustomTkinter / edge-tts / pygame / PyInstaller
-- GitHub Actions 自动构建 Windows 单文件版
+- Modern Windows GUI for text-to-MP3 synthesis
+- Preview playback and full MP3 export
+- Network checks, proxy awareness, stalled-generation recovery, and retries
+- Custom Inno Setup installer plus portable EXE packaging
+- MIT license and GitHub Actions release automation

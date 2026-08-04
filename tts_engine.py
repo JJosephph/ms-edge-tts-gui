@@ -12,6 +12,7 @@
 import asyncio
 import os
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -28,6 +29,12 @@ RECEIVE_TIMEOUT = 120         # edge-tts 单次接收超时（兜底）
 PROBE_TIMEOUT = 6             # 网络探测超时
 MAX_RETRIES = 3               # 最大生成重试次数
 PROGRESS_REPORT_INTERVAL = 0.25
+
+
+def estimate_spoken_units(text: str) -> int:
+    """Estimate spoken units for a responsive, approximate TTS percentage."""
+    units = re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+(?:['’\-][A-Za-z0-9]+)?", text)
+    return max(1, len(units))
 
 # edge-tts 使用的真实服务地址（用于网络探测，最贴近真实链路）
 PROBE_URL = "https://speech.platform.bing.com/"
@@ -153,12 +160,12 @@ class TTSEngine:
     def __init__(
         self,
         on_log: Optional[Callable[[str], None]] = None,
-        on_progress: Optional[Callable[[int], None]] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
         controller: Optional[StallController] = None,
         cancel_event: Optional[threading.Event] = None,
     ):
         self.on_log = on_log or (lambda msg: None)
-        self.on_progress = on_progress or (lambda written: None)
+        self.on_progress = on_progress or (lambda percent, written: None)
         self.controller = controller
         self.cancel_event = cancel_event or threading.Event()
         self.proxy = detect_proxy()
@@ -211,6 +218,10 @@ class TTSEngine:
 
         last_report = time.perf_counter()
         written = 0
+        total_units = estimate_spoken_units(text)
+        completed_units = 0
+        percent = 0
+        self.on_progress(percent, written)
         try:
             iterator = communicate.stream()
             with open(temp_path, "wb") as audio_file:
@@ -244,9 +255,14 @@ class TTSEngine:
                         now = time.perf_counter()
                         if now - last_report >= PROGRESS_REPORT_INTERVAL:
                             last_report = now
-                            self.on_progress(written)
+                            self.on_progress(percent, written)
                     elif chunk_type == "WordBoundary":
-                        pass  # 词边界元数据，供未来功能使用
+                        completed_units += 1
+                        percent = min(99, int(completed_units * 100 / total_units))
+                        now = time.perf_counter()
+                        if now - last_report >= PROGRESS_REPORT_INTERVAL:
+                            last_report = now
+                            self.on_progress(percent, written)
 
             if written == 0:
                 raise RuntimeError("TTS 未返回任何音频数据。")
@@ -256,6 +272,7 @@ class TTSEngine:
             if os.path.exists(final_path):
                 os.unlink(final_path)
             os.replace(temp_path, final_path)
+            self.on_progress(100, written)
             return "done"
 
         except UserCanceled:

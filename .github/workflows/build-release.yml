@@ -30,6 +30,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           sed -i "s/APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" app.py
 
       - name: PyInstaller 打包（目录版，供安装器使用）
@@ -46,7 +47,7 @@ jobs:
         run: |
           $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { $iscc = Get-ChildItem "C:\Program Files\Inno Setup*\ISCC.exe" | Select-Object -First 1 -ExpandProperty FullName }
-          & $iscc installer\EdgeTTSGui.iss
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" installer\EdgeTTSGui.iss
           Get-ChildItem dist | Select-Object Name, Length
 
       - name: 上传到 Release
