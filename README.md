@@ -71,7 +71,7 @@ The project is designed as a general-purpose open-source tool. It includes pract
 ## Interface Preview
 
 <p align="center">
-  <img src="assets/ui-preview-dark.svg" alt="Dark theme preview" width="900">
+  <img src="assets/ui-preview-dark.png" alt="Dark theme preview" width="900">
 </p>
 
 <p align="center">
@@ -79,7 +79,7 @@ The project is designed as a general-purpose open-source tool. It includes pract
 </p>
 
 <p align="center">
-  <img src="assets/ui-preview-light.svg" alt="Light theme preview" width="900">
+  <img src="assets/ui-preview-light.png" alt="Light theme preview" width="900">
 </p>
 
 <p align="center">
