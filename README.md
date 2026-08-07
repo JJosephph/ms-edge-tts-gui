@@ -106,13 +106,15 @@ The project is designed as a general-purpose open-source tool. It includes pract
 
 Open the [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) page and choose the package that fits your use case:
 
-| Package | Best for | Notes |
-| --- | --- | --- |
-| `EdgeTTSGui-Setup.exe` | Most Windows users | Bilingual (中文/English) installer; free & open source with the developer shown; choose any drive/folder; desktop shortcut; full uninstall support; GitHub Star prompt after install. |
-| `EdgeTTSGui-Portable.exe` | Portable use | Single-file executable; double-click to run. |
-| `EdgeTTSGui/EdgeTTSGui.exe` | Advanced users | Directory build for manual deployment. |
+| Package | What it is | Best for | Notes |
+| --- | --- | --- | --- |
+| `EdgeTTSGui-Setup.exe` | Installer (Inno Setup) | Most Windows users | Bilingual (中文/English) wizard that states **free & open source (MIT License)** and **developer WangYufan**; choose any drive/folder; desktop shortcut; **full uninstall support**; Star prompt after install. |
+| `EdgeTTSGui-Portable.exe` | Single-file portable | Take-anywhere / no-install use | Python runtime and libraries bundled in one file; double-click to run; largest download. |
+| `EdgeTTSGui/EdgeTTSGui.exe` | Main launcher of the folder build | Advanced / manual deployment | Small 5 MB launcher — it needs its sibling `_internal\` folder to run, so treat the whole `EdgeTTSGui\` folder as the package. |
 
-All packages are **free and open source (MIT License)**, maintained by **WangYufan**. The installer wizard itself states the open-source/free status and the developer, and it supports normal uninstallation.
+**Which one should I download?** If you are not sure, pick `EdgeTTSGui-Setup.exe` — it installs cleanly and can be uninstalled. `EdgeTTSGui-Portable.exe` is the drop-in no-install choice.
+
+All packages are **free and open source (MIT License)**, maintained by **WangYufan**.
 
 ### Is Python included?
 
