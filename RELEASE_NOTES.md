@@ -1,5 +1,11 @@
 # Release Notes
 
+## v1.0.7
+
+### Fixed
+
+- Fixed the stalled-generation **“Keep waiting”** option: it no longer breaks the audio stream or repeatedly re-opens the stall dialog (the infinite-loop feel). The async iterator is no longer cancelled on timeout; after choosing to keep waiting, the app waits quietly with a longer grace period instead of popping the dialog again.
+
 ## v1.0.6
 
 ### New and improved

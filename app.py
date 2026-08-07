@@ -37,7 +37,7 @@ from tts_engine import (
 from text_utils import clean_text, default_filename, normalize_for_tts
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
