@@ -1,5 +1,16 @@
 # Release Notes
 
+## v1.1.0
+
+### New and improved
+
+- Reworked the workflow to **Generate Audio → ▶ Play / Save Audio**: the full audio is synthesized once, then previewing or saving reuses it without re-rendering.
+- Fixed the progress bar bug: it no longer resets to 0% when generation finishes — it now stays at 100%.
+- Generated audio is automatically invalidated when text, voice, rate, volume, or pitch changes, so Play/Save always match the current settings.
+- Fixed the Inno Setup installer encoding (UTF-8 with BOM) so the Chinese app name renders correctly; the wizard now shows **免费开源 / Free & Open Source (MIT License)** and **developer WangYufan**, is bilingual (中文 / English), and keeps full uninstall support.
+- Added a bilingual **“求点赞 · 请先读我 / Star Us · Please Read First”** section with the repository address to the README.
+- Updated README and release notes for v1.1.0.
+
 ## v1.0.3
 
 ### Fixed

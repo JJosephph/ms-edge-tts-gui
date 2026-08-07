@@ -23,16 +23,28 @@
 
 ---
 
+## ⭐ 求点赞 · 请先读我 / Star Us · Please Read First
+
+> **中文**：本项目 **免费、开源（MIT License）**，开发者 **WangYufan**。
+> 仓库地址：https://github.com/JJosephph/ms-edge-tts-gui
+> 如果你觉得这个工具对你有帮助，请先到仓库点一个 **Star**，让更多用户能找到它；使用中遇到问题，欢迎提交 [Issue](https://github.com/JJosephph/ms-edge-tts-gui/issues) 或 PR。
+
+> **English**: This project is **free and open source (MIT License)**, developed by **WangYufan**.
+> Repository: https://github.com/JJosephph/ms-edge-tts-gui
+> If this tool helps you, please **Star** the repository first so more users can discover it; issues and pull requests are welcome.
+
+---
+
 ## 中文说明
 
-**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。界面可随时切换中文和 English，适合全世界用户。
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。界面可随时切换中文和 English，适合全世界用户。
 
-- **试听与导出**：试听首 400 字，或导出完整 MP3。
-- **实时进度**：试听和导出都显示近似 `0–100%` 合成进度。
+- **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
+- **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
 - **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
 - **语音库**：支持 Microsoft Edge 大量声音，中文模式会翻译语言、地区和性别标签。
 - **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；另有推荐中文女声 `zh-CN-XiaoxiaoNeural`。
-- **不占空间**：试听只重复使用一个临时 MP3，可选目录、打开或清理，并在关闭软件时自动删除。
+- **不占空间**：生成的音频只保存在一个临时 MP3 里，可自定义目录、打开或清理，关闭软件时自动删除。
 
 ### 中文界面预览
 
@@ -44,14 +56,15 @@
 
 1. 在 [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) 下载 `EdgeTTSGui-Setup.exe`，安装时可选任意磁盘或文件夹。
 2. 安装包与便携版 EXE 均已内置 Python 运行环境，Windows 10 及更高版本无需另行安装 Python。
-3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，先点“试听”，确认后点“导出音频”。
+3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，点击“生成音频”合成一次；之后点“试听”播放，或点“保存下载”导出 MP3，全程无需重复合成。
+4. 安装包会标明“免费 · 开源（MIT License）· 开发者 WangYufan”，支持从 Windows“设置 → 应用”或安装目录中的 `unins000.exe` 卸载。
 
 ---
 
 ## English Guide
 
 
-**Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**.
+**Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **WangYufan**.
 
 The project is designed as a general-purpose open-source tool. It includes practical safeguards for real-world network conditions, including service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt.
 
@@ -78,8 +91,8 @@ The project is designed as a general-purpose open-source tool. It includes pract
 | Area | What it provides |
 | --- | --- |
 | **Text to MP3** | Paste Markdown, plain text, or HTML-derived text and export a full MP3 file. |
-| **Instant preview** | Quickly synthesize and play the first 400 characters before exporting the complete audio. |
-| **Real progress** | Preview and export both show live, approximate `0–100%` synthesis progress plus received audio size. |
+| **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. |
+| **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
 | **Voice catalog** | Loads hundreds of Edge voices; Chinese mode renders locale and gender labels in Chinese, while English mode preserves Microsoft’s original naming. |
 | **Original workflow compatibility** | Default settings mirror the existing RPA workflow: `en-US-AndrewMultilingualNeural`, rate `+0%`, volume `+0%`, pitch `+0Hz`. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
@@ -95,9 +108,11 @@ Open the [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) page 
 
 | Package | Best for | Notes |
 | --- | --- | --- |
-| `EdgeTTSGui-Setup.exe` | Most Windows users | Modern installer, choose any drive/folder, desktop shortcut option, uninstaller, and a GitHub Star prompt after installation. |
+| `EdgeTTSGui-Setup.exe` | Most Windows users | Bilingual (中文/English) installer; free & open source with the developer shown; choose any drive/folder; desktop shortcut; full uninstall support; GitHub Star prompt after install. |
 | `EdgeTTSGui-Portable.exe` | Portable use | Single-file executable; double-click to run. |
 | `EdgeTTSGui/EdgeTTSGui.exe` | Advanced users | Directory build for manual deployment. |
+
+All packages are **free and open source (MIT License)**, maintained by **WangYufan**. The installer wizard itself states the open-source/free status and the developer, and it supports normal uninstallation.
 
 ### Is Python included?
 
@@ -110,7 +125,7 @@ Open the [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) page 
 1. Download `EdgeTTSGui-Setup.exe` from [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases).
 2. Run the installer and choose any destination drive or folder.
 3. Launch **Edge TTS Voice Studio** from the Start menu or desktop shortcut.
-4. Paste text, preview it, and export the final MP3.
+4. Paste text, click **Generate Audio**, then **Play** to preview or **Save Audio** to export the MP3.
 
 ### Option B — Run from source
 
@@ -131,9 +146,9 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 1. **Paste your text** into the Composer panel.
 2. **Choose a voice** from the Voice Deck. The default already matches the existing RPA configuration; use **Restore workflow defaults** at any time.
 3. **Adjust rate, volume, and pitch** if needed.
-4. Click **Preview** to generate a short audio sample.
-5. Click **Export MP3** to select a save location and synthesize the complete text.
-6. Watch the status line and progress bar during generation.
+4. Click **Generate Audio** to synthesize the full text once.
+5. After generation, click **▶ Play** to listen, or **Save Audio** to export the MP3 — both reuse the generated audio with no re-rendering.
+6. Watch the status line and progress bar during generation; the bar stays at 100% when done.
 
 ## Network and Proxy
 
@@ -150,17 +165,26 @@ If the service cannot be reached, the app reports the condition in the Activity 
 - **Retry** — starts the current synthesis again (up to three attempts);
 - **Cancel** — stops the task and removes the partial file.
 
-## Preview Cache and Disk Usage
+## Generated Audio Cache and Disk Usage
 
-Preview audio is deliberately designed not to accumulate:
+Generated audio is deliberately designed not to accumulate:
 
 - The default location is the operating system temporary folder.
-- Only one file, `edge_tts_preview.mp3`, is reused for previews.
-- It is overwritten on every new preview.
+- Only one file, `edge_tts_preview.mp3`, is reused for the generated audio.
+- It is overwritten on every new generation.
 - It is removed automatically when the application exits.
-- Use **⚙ Settings** to set another cache folder, open it, or clear the preview file immediately.
+- Use **⚙ Settings** to set another cache folder, open it, or clear the generated audio immediately.
 
-Exported MP3 files are written only to the location the user explicitly selects.
+When you save, the MP3 is copied to the location you choose; the cache file itself is not kept after the app closes.
+
+## Uninstall
+
+The installed program can be uninstalled normally:
+
+- Open **Windows Settings → Apps → Installed apps**, find **Edge TTS 语音合成助手**, and click **Uninstall**.
+- Or run `unins000.exe` in the installation directory (for example `C:\Program Files\EdgeTTSGui\unins000.exe`).
+
+The uninstaller removes the application files and shortcuts.
 
 ## Defaults and Voice Recommendations
 
@@ -212,8 +236,8 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## Privacy and Service Notice

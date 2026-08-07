@@ -2,7 +2,7 @@
 """Edge TTS 语音合成助手 —— 现代化桌面 GUI 客户端。
 
 功能：
-- 粘贴文章一键转语音，支持试听与导出 MP3
+- 粘贴文章一键生成音频：生成一次，之后可随时试听或保存下载（无需重复合成）
 - 网络检测：离线 / 代理异常会提示
 - 卡住检测：长时间无音频数据时提示是否重试
 - 开源标识 / 仓库地址 / 开发者信息
@@ -12,6 +12,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import tempfile
 import threading
 import webbrowser
@@ -33,10 +34,10 @@ from tts_engine import (
     list_tts_voices,
     probe_network,
 )
-from text_utils import clean_text, default_filename, normalize_for_tts, preview_text
+from text_utils import clean_text, default_filename, normalize_for_tts
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.1.0"
 DEVELOPER = "WangYufan"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
@@ -125,6 +126,8 @@ class App(ctk.CTk):
         self._search_text = ""
         self._language = "zh"
         self._selected_voice_code = DEFAULT_VOICE
+        self._generated_path: str | None = None
+        self._generated_text: str | None = None
 
         self._build_ui()
         self._bind_events()
@@ -157,7 +160,7 @@ class App(ctk.CTk):
         "network_bad": {"zh": "●  网络异常", "en": "●  Network unavailable"},
         "article": {"zh": "文章内容", "en": "Article"},
         "count": {"zh": "字数：{count}", "en": "Characters: {count}"},
-        "helper": {"zh": "支持 Markdown / 纯文本；试听只合成前 400 字。", "en": "Markdown and plain text supported; preview synthesizes the first 400 characters."},
+        "helper": {"zh": "支持 Markdown / 纯文本；生成一次全文音频，之后可随时试听或保存下载，无需重复合成。", "en": "Markdown and plain text supported; synthesize once, then play or save anytime without re-rendering."},
         "voice": {"zh": "语音", "en": "Voice"},
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
         "original": {"zh": "原工作流默认：Andrew Multilingual · 语速 +0% · 音量 +0% · 音调 +0Hz", "en": "Original workflow: Andrew Multilingual · rate +0% · volume +0% · pitch +0Hz"},
@@ -167,8 +170,14 @@ class App(ctk.CTk):
         "volume": {"zh": "音量", "en": "Volume"},
         "pitch": {"zh": "音调", "en": "Pitch"},
         "ready": {"zh": "就绪", "en": "Ready"},
-        "preview": {"zh": "试听", "en": "Preview"},
-        "export": {"zh": "导出音频", "en": "Export MP3"},
+        "generate": {"zh": "生成音频", "en": "Generate Audio"},
+        "play": {"zh": "▶ 试听", "en": "▶ Play"},
+        "save": {"zh": "保存下载", "en": "Save Audio"},
+        "generated_ok": {"zh": "已生成 ✔ 可试听 / 保存", "en": "Generated ✔ Play or save"},
+        "canceled": {"zh": "已取消", "en": "Canceled"},
+        "failed": {"zh": "失败 ✖", "en": "Failed ✖"},
+        "stopped": {"zh": "已停止", "en": "Stopped"},
+        "no_audio": {"zh": "请先点击“生成音频”生成一段音频。", "en": "Please click “Generate Audio” first."},
         "stop": {"zh": "停止", "en": "Stop"},
         "log": {"zh": "活动日志", "en": "Activity log"},
         "footer": {"zh": "免费开源软件 · MIT License · Powered by Microsoft Edge TTS", "en": "Free open-source software · MIT License · Powered by Microsoft Edge TTS"},
@@ -291,11 +300,11 @@ class App(ctk.CTk):
         dialog.grab_set()
         dialog.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(dialog, text="Preview cache" if is_english else "试听缓存", font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(22, 4))
+        ctk.CTkLabel(dialog, text="Generated audio cache" if is_english else "生成音频缓存", font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(22, 4))
         hint = (
-            "Preview uses one temporary MP3 only. It is overwritten each time and removed when the app closes."
+            "Generated audio is kept in one temporary MP3. It is overwritten on the next generation and removed when the app closes."
             if is_english
-            else "试听只使用一个临时 MP3 文件：每次会覆盖，程序退出时自动删除，不会持续占用空间。"
+            else "生成的音频放在一个临时 MP3 文件里：下次生成会覆盖，程序退出时自动删除，不会持续占用空间。"
         )
         ctk.CTkLabel(dialog, text=hint, wraplength=560, justify="left", text_color="#a9b1d6").grid(row=1, column=0, sticky="w", padx=22, pady=(0, 12))
 
@@ -307,7 +316,7 @@ class App(ctk.CTk):
         entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
         def choose_directory():
-            chosen = filedialog.askdirectory(title="Select preview cache folder" if is_english else "选择试听缓存目录", initialdir=path_var.get() or os.path.expanduser("~"))
+            chosen = filedialog.askdirectory(title="Select generated audio cache folder" if is_english else "选择生成音频缓存目录", initialdir=path_var.get() or os.path.expanduser("~"))
             if chosen:
                 path_var.set(chosen)
 
@@ -334,19 +343,21 @@ class App(ctk.CTk):
                     os.unlink(old_path)
             except OSError:
                 pass
-            self.log(("Preview cache folder set: " if is_english else "试听缓存目录已设置：") + directory)
+            self._invalidate_generated()
+            self.log(("Generated audio cache folder set: " if is_english else "生成音频缓存目录已设置：") + directory)
             dialog.destroy()
 
         def clear_preview():
             self._stop_playback()
             self._cleanup_preview_file()
-            self.log("Preview cache cleared." if is_english else "试听缓存已清理。")
-            messagebox.showinfo(self._app_name(), "Preview cache cleared." if is_english else "试听缓存已清理。")
+            self._invalidate_generated()
+            self.log("Generated audio cache cleared." if is_english else "生成音频缓存已清理。")
+            messagebox.showinfo(self._app_name(), "Generated audio cache cleared." if is_english else "生成音频缓存已清理。")
 
         buttons = ctk.CTkFrame(dialog, fg_color="transparent")
         buttons.grid(row=3, column=0, sticky="e", padx=22, pady=(20, 8))
         ctk.CTkButton(buttons, text="Open folder" if is_english else "打开目录", width=104, fg_color="#3a4358", hover_color="#4a546c", command=lambda: os.startfile(self._preview_dir)).pack(side="left", padx=4)
-        ctk.CTkButton(buttons, text="Clear preview cache" if is_english else "清理试听缓存", width=122, fg_color="#3a4358", hover_color="#4a546c", command=clear_preview).pack(side="left", padx=4)
+        ctk.CTkButton(buttons, text="Clear generated audio cache" if is_english else "清理生成缓存", width=150, fg_color="#3a4358", hover_color="#4a546c", command=clear_preview).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Save" if is_english else "保存", width=86, command=save_directory).pack(side="left", padx=4)
 
     def _font(self, size=13, weight="normal"):
@@ -500,10 +511,14 @@ class App(ctk.CTk):
         actions.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 9))
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
-        self._btn_preview = ctk.CTkButton(actions, text=self._t("preview"), command=self._on_preview, height=34, font=self._font(size=13, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
-        self._btn_preview.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        self._btn_export = ctk.CTkButton(actions, text=self._t("export"), command=self._on_export, height=34, font=self._font(size=13, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
-        self._btn_export.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self._btn_generate = ctk.CTkButton(actions, text=self._t("generate"), command=self._on_generate, height=36, font=self._font(size=14, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
+        self._btn_generate.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self._btn_play = ctk.CTkButton(actions, text=self._t("play"), command=self._on_play, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
+        self._btn_play.grid(row=1, column=0, sticky="ew", padx=(0, 4))
+        self._btn_save = ctk.CTkButton(actions, text=self._t("save"), command=self._on_save, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"))
+        self._btn_save.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+        self._sync_generated_status()
+        self._update_generated_buttons()
         self._update_voice_info()
 
     def _add_slider_card(self, master, column, label, variable, minimum, maximum, formatter):
@@ -513,7 +528,11 @@ class App(ctk.CTk):
         ctk.CTkLabel(card, text=label, text_color=self._c("muted"), anchor="w", font=self._font(size=11, weight="bold")).grid(row=0, column=0, sticky="w")
         value_label = ctk.CTkLabel(card, text=formatter(variable.get()), text_color=self._c("accent"), anchor="e", font=self._font(size=11, weight="bold"))
         value_label.grid(row=1, column=0, sticky="ew", pady=(1, 1))
-        slider = ctk.CTkSlider(card, height=14, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=lambda value: value_label.configure(text=formatter(value)))
+        def _on_slider_change(value):
+            value_label.configure(text=formatter(value))
+            self._invalidate_generated()
+
+        slider = ctk.CTkSlider(card, height=14, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=_on_slider_change)
         slider.grid(row=2, column=0, sticky="ew")
 
     def _fmt_rate(self, value):
@@ -545,7 +564,7 @@ class App(ctk.CTk):
 
     def _bind_events(self):
         self._voice_search.bind("<KeyRelease>", self._on_search_voice)
-        self._textbox.bind("<KeyRelease>", self._on_text_changed)
+        self._textbox.bind("<KeyRelease>", self._on_text_edited)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ============================================================ 后台任务
@@ -661,6 +680,7 @@ class App(ctk.CTk):
             if self._display_name(code) == value:
                 self._selected_voice_code = code
                 break
+        self._invalidate_generated()
         self._update_voice_info()
 
     def _restore_original_defaults(self):
@@ -669,6 +689,7 @@ class App(ctk.CTk):
         self._volume_var.set(DEFAULT_VOLUME)
         self._pitch_var.set(DEFAULT_PITCH)
         self._refresh_voice_combo()
+        self._invalidate_generated()
         self.log(self._t("original"))
 
     def _selected_voice(self) -> str:
@@ -726,6 +747,13 @@ class App(ctk.CTk):
         text = self._textbox.get("1.0", "end-1c")
         self._char_count.configure(text=self._t("count", count=len(text)))
 
+    def _on_text_edited(self, _event=None):
+        self._on_text_changed()
+        if self._generated_text is not None:
+            current = self._get_cleaned_text()
+            if current != self._generated_text:
+                self._invalidate_generated()
+
     def _get_cleaned_text(self):
         raw = self._textbox.get("1.0", "end-1c")
         return normalize_for_tts(clean_text(raw))
@@ -780,29 +808,37 @@ class App(ctk.CTk):
             result = engine.generate(task.text, task.output_path, task.cfg)
         except Exception as exc:  # noqa: BLE001
             result = {"status": "error", "error": str(exc)}
+        result["text"] = task.text
         self._ui_q.put(("task_done", task.mode, result))
 
     def _on_task_done(self, mode, result):
         self._busy = False
         self._set_busy_ui(False)
-        self._progress.stop()
-        self._progress.set(0)
 
         status = result.get("status")
         if status == "done":
-            self._status_label.configure(text="完成 ✔", text_color="#9ece6a")
+            current_text = self._get_cleaned_text()
+            generated_text = result.get("text") or current_text
+            if current_text != generated_text:
+                self._progress.set(0)
+                self._status_label.configure(text=self._t("ready"), text_color=self._c("success"))
+                self.log("[生成] 生成期间文本已修改，请重新生成。")
+                return
             path = result["path"]
-            if mode == "preview":
-                self.log(f"[试听] 已生成试听音频，开始播放…")
-                self._play_audio(path)
-            else:
-                self.log(f"[导出] 音频已保存：{path}")
-                self._maybe_open_folder(path)
+            self._generated_path = path
+            self._generated_text = generated_text
+            size_kb = os.path.getsize(path) / 1024 if os.path.exists(path) else 0
+            self._progress.set(1.0)
+            self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
+            self.log(f"[生成] 音频已生成：{path}（{size_kb:.0f} KB），可试听或保存下载。")
+            self._update_generated_buttons()
         elif status == "canceled":
-            self._status_label.configure(text="已取消", text_color="#e0af68")
+            self._progress.set(0)
+            self._status_label.configure(text=self._t("canceled"), text_color="#e0af68")
             self.log("[任务] 已取消。")
         else:
-            self._status_label.configure(text="失败 ✖", text_color="#f7768e")
+            self._progress.set(0)
+            self._status_label.configure(text=self._t("failed"), text_color="#f7768e")
             self.log(f"[任务] 失败：{result.get('error', '未知错误')}")
             messagebox.showerror(
                 APP_NAME,
@@ -813,24 +849,33 @@ class App(ctk.CTk):
 
     # ============================================================ 按钮动作
 
-    def _on_preview(self):
+    def _on_generate(self):
         cleaned = self._get_cleaned_text()
         if not cleaned:
             messagebox.showwarning(APP_NAME, "请输入文章内容。")
             return
-        sample = preview_text(cleaned)
-        self.log(f"[试听] 使用前 {len(sample)} 字生成试听（共 {len(cleaned)} 字）")
         self._stop_playback()
-        self._start_task(sample, self._preview_path, "preview")
+        self.log(f"[生成] 开始合成全文音频（{len(cleaned)} 字）")
+        self._start_task(cleaned, self._preview_path, "generate")
 
-    def _on_export(self):
-        cleaned = self._get_cleaned_text()
-        if not cleaned:
-            messagebox.showwarning(APP_NAME, "请输入文章内容。")
+    def _on_play(self):
+        if not self._generated_path or not os.path.exists(self._generated_path):
+            messagebox.showinfo(APP_NAME, self._t("no_audio"))
+            return
+        if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+            self._stop_playback()
+            self.log("[试听] 已停止播放。")
+            return
+        self.log("[试听] 开始播放已生成的音频…")
+        self._play_audio(self._generated_path)
+
+    def _on_save(self):
+        if not self._generated_path or not os.path.exists(self._generated_path):
+            messagebox.showinfo(APP_NAME, self._t("no_audio"))
             return
         default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
         path = filedialog.asksaveasfilename(
-            title="导出音频",
+            title="保存音频",
             defaultextension=".mp3",
             filetypes=[("MP3 音频", "*.mp3")],
             initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
@@ -838,15 +883,19 @@ class App(ctk.CTk):
         )
         if not path:
             return
-        self.log(f"[导出] 开始生成全文音频（{len(cleaned)} 字）→ {path}")
-        self._start_task(cleaned, path, "export")
+        try:
+            shutil.copy2(self._generated_path, path)
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"保存失败：{exc}")
+            return
+        self.log(f"[保存] 音频已保存：{path}")
+        self._maybe_open_folder(path)
 
     def _on_stop(self):
         self.log("[任务] 正在停止…")
         self._cancel_event.set()
         self._stop_playback()
-        self._progress.stop()
-        self._status_label.configure(text="已停止", text_color="#e0af68")
+        self._status_label.configure(text=self._t("stopped"), text_color="#e0af68")
 
     # ============================================================ 播放
 
@@ -880,7 +929,7 @@ class App(ctk.CTk):
             "准备重试…": "Preparing retry…",
             "开始检测网络…": "Checking network…",
             "网络检测通过": "Network check passed.",
-            "试听缓存已清理。": "Preview cache cleared.",
+            "生成音频缓存已清理。": "Generated audio cache cleared.",
             "[任务] 正在停止…": "[Task] Stopping…",
             "[任务] 已取消。": "[Task] Canceled.",
         }
@@ -893,10 +942,12 @@ class App(ctk.CTk):
         substitutions = [
             (r"^\[语音\] 已加载 (\d+) 个可用语音$", r"[Voice] Loaded \1 available voices"),
             (r"^\[语音\] 加载语音列表失败：(.*)$", r"[Voice] Could not load voice list: \1"),
-            (r"^\[试听\] 使用前 (\d+) 字生成试听（共 (\d+) 字）$", r"[Preview] Synthesizing the first \1 characters (\2 total)"),
-            (r"^\[试听\] 已生成试听音频，开始播放…$", r"[Preview] Audio created. Starting playback…"),
-            (r"^\[导出\] 开始生成全文音频（(\d+) 字）→ (.*)$", r"[Export] Synthesizing full audio (\1 characters) → \2"),
-            (r"^\[导出\] 音频已保存：(.*)$", r"[Export] Audio saved: \1"),
+            (r"^\[生成\] 开始合成全文音频（(\d+) 字）$", r"[Generate] Synthesizing full audio (\1 characters)"),
+            (r"^\[生成\] 音频已生成：(.*)$", r"[Generate] Audio ready: \1"),
+            (r"^\[生成\] 生成期间文本已修改，请重新生成。$", r"[Generate] Text changed during generation. Please generate again."),
+            (r"^\[试听\] 开始播放已生成的音频…$", r"[Play] Playing generated audio…"),
+            (r"^\[试听\] 已停止播放。$", r"[Play] Playback stopped."),
+            (r"^\[保存\] 音频已保存：(.*)$", r"[Save] Audio saved: \1"),
             (r"^\[任务\] 失败：(.*)$", r"[Task] Failed: \1"),
             (r"^\[网络\] 不可达，检测到代理 (.*)，可能是网络不通或代理设置不正确。$", r"[Network] Unreachable; proxy detected: \1. Check the connection or proxy configuration."),
             (r"^\[网络\] 不可达（(.*)）。生成可能很慢或失败，建议检查网络后重试。$", r"[Network] Unreachable (\1). Synthesis may be slow or fail; check your network and retry."),
@@ -964,7 +1015,13 @@ class App(ctk.CTk):
         return result["value"]
 
     def _maybe_open_folder(self, path):
-        if messagebox.askyesno(APP_NAME, "音频已导出：\n" + path + "\n\n是否打开所在文件夹？"):
+        is_english = self._language == "en"
+        message = (
+            f"Audio saved:\n{path}\n\nOpen the containing folder?"
+            if is_english
+            else f"音频已保存：\n{path}\n\n是否打开所在文件夹？"
+        )
+        if messagebox.askyesno(APP_NAME, message):
             try:
                 os.startfile(os.path.dirname(path))
             except Exception:  # noqa: BLE001
@@ -980,11 +1037,30 @@ class App(ctk.CTk):
         self._log.see("end")
         self._log.configure(state="disabled")
 
+    def _sync_generated_status(self):
+        if self._generated_path and os.path.exists(self._generated_path):
+            self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
+            self._progress.set(1.0)
+        else:
+            self._status_label.configure(text=self._t("ready"), text_color=self._c("success"))
+            self._progress.set(0)
+
+    def _update_generated_buttons(self):
+        available = bool(self._generated_path) and os.path.exists(self._generated_path)
+        state = "normal" if available and not self._busy else "disabled"
+        self._btn_play.configure(state=state)
+        self._btn_save.configure(state=state)
+
+    def _invalidate_generated(self):
+        self._generated_path = None
+        self._generated_text = None
+        self._sync_generated_status()
+        self._update_generated_buttons()
+
     def _set_busy_ui(self, busy: bool):
-        state = "disabled" if busy else "normal"
-        self._btn_preview.configure(state=state)
-        self._btn_export.configure(state=state)
+        self._btn_generate.configure(state="disabled" if busy else "normal")
         self._btn_stop.configure(state="normal" if busy else "disabled")
+        self._update_generated_buttons()
 
     def _on_close(self):
         self._cancel_event.set()
