@@ -22,11 +22,11 @@ import aiohttp
 import edge_tts
 
 # ---------------------------------------------------------------- 常量
-STALL_TIMEOUT = 20            # 连续多少秒没有新音频分片 -> 首次提示卡住
-STALL_WAIT_GRACE = 60         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
-STALL_DECISION_TIMEOUT = 90   # 卡住后等待用户决定的最长时间（秒）
+STALL_TIMEOUT = 180            # 连续多少秒没有新音频分片 -> 首次提示卡住
+STALL_WAIT_GRACE = 300         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
+STALL_DECISION_TIMEOUT = 300   # 卡住后等待用户决定的最长时间（秒）
 CONNECT_TIMEOUT = 10          # edge-tts 建连超时
-RECEIVE_TIMEOUT = 120         # edge-tts 单次接收超时（兜底）
+RECEIVE_TIMEOUT = 300         # edge-tts 单次接收超时（兜底）
 PROBE_TIMEOUT = 6             # 网络探测超时
 MAX_RETRIES = 3               # 最大生成重试次数
 PROGRESS_REPORT_INTERVAL = 0.25
@@ -292,9 +292,7 @@ class TTSEngine:
 
             final_path = os.path.abspath(output_path)
             os.makedirs(os.path.dirname(final_path), exist_ok=True)
-            if os.path.exists(final_path):
-                os.unlink(final_path)
-            os.replace(temp_path, final_path)
+            self._safe_replace(temp_path, final_path)
             self.on_progress(100, written)
             return "done"
 
@@ -344,6 +342,22 @@ class TTSEngine:
     @staticmethod
     def _temp_path(output_path) -> str:
         return str(output_path) + ".partial"
+
+    @staticmethod
+    def _safe_replace(temp_path: str, final_path: str) -> None:
+        """?????????????????????????????????? WinError 32?"""
+        last_error = None
+        for _ in range(6):
+            try:
+                if os.path.exists(final_path):
+                    os.unlink(final_path)
+                os.replace(temp_path, final_path)
+                return
+            except OSError as exc:
+                last_error = exc
+                time.sleep(0.3)
+        if last_error is not None:
+            raise last_error
 
     @staticmethod
     def _safe_unlink(path: str) -> None:

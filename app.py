@@ -37,7 +37,7 @@ from tts_engine import (
 from text_utils import clean_text, default_filename, normalize_for_tts
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -912,8 +912,10 @@ class App(ctk.CTk):
 
     def _stop_playback(self):
         try:
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
+            if pygame.mixer.get_init():
+                if pygame.mixer.music.get_busy():
+                    pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
         except Exception:  # noqa: BLE001
             pass
 

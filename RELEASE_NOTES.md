@@ -1,5 +1,16 @@
 # Release Notes
 
+## v1.0.8
+
+### Improved
+
+- Lengthened the stall detection: the app now waits a full **3 minutes** (up from 20 seconds) of silence before it asks if generation is stuck, and won't keep re-prompting while you keep waiting. The network receive timeout was raised to match, so a brief network pause is no longer misreported as a stall or error.
+
+### Fixed
+
+- Fixed the **WinError 32 "another program is using this file"** popup loop after generating audio: the file was still locked by the playback session. The player now unloads the audio file when stopping, and the engine retries writing the output file (up to ~1.8s) if the target is temporarily locked, so preview/download no longer fail with a locked-file error.
+
+
 ## v1.0.7
 
 ### Fixed
