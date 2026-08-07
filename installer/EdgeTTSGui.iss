@@ -46,8 +46,8 @@ VersionInfoDescription={#MyAppName}
 VersionInfoProductName={#MyAppName}
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"; LicenseFile: "..\LICENSE.zh.txt"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "..\LICENSE"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}:"
@@ -55,6 +55,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\dist\EdgeTTSGui\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE.zh.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

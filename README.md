@@ -255,7 +255,7 @@ Issues, feature requests, and pull requests are welcome. If this project helps y
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE) · 中文版见 [LICENSE.zh.txt](LICENSE.zh.txt).
 
 - **Maintainer:** WangYufan
 - **Repository:** https://github.com/JJosephph/ms-edge-tts-gui
