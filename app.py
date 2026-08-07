@@ -37,8 +37,9 @@ from tts_engine import (
 from text_utils import clean_text, default_filename, normalize_for_tts
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 DEVELOPER = "WangYufan"
+DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
 UI_FONT_FAMILY = "Microsoft YaHei UI"
@@ -558,7 +559,8 @@ class App(ctk.CTk):
         footer.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 10))
         footer.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(footer, text=self._t("footer"), text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(footer, text=f"{self._t('developer')} · {DEVELOPER}  |  {REPOSITORY_DISPLAY}", text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=1, sticky="e")
+        qq_suffix = f"（QQ {DEVELOPER_QQ}）" if self._language == "zh" else f" (QQ {DEVELOPER_QQ})"
+        ctk.CTkLabel(footer, text=f"{self._t('developer')} · {DEVELOPER}{qq_suffix}  |  {REPOSITORY_DISPLAY}", text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=1, sticky="e")
 
     # ============================================================ 事件绑定
 

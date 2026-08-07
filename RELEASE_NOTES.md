@@ -1,5 +1,12 @@
 # Release Notes
 
+## v1.0.6
+
+### New and improved
+
+- The installer's **"Open GitHub and Star the open-source project / 打开 GitHub 为开源项目点 Star"** option is now **checked by default**.
+- Fixed the installer failing to open the GitHub page: the URL entry now uses `shellexec runasoriginaluser`, so it opens in the default browser as the normal user.
+
 ## v1.0.5
 
 ### New and improved

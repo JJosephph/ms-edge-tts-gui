@@ -25,11 +25,11 @@
 
 ## ⭐ 求点赞 · 请先读我 / Star Us · Please Read First
 
-> **中文**：本项目 **免费、开源（MIT License）**，开发者 **WangYufan**。
+> **中文**：本项目 **免费、开源（MIT License）**，开发者 **WangYufan**（QQ 1471056247）。
 > 仓库地址：https://github.com/JJosephph/ms-edge-tts-gui
 > 如果你觉得这个工具对你有帮助，请先到仓库点一个 **Star**，让更多用户能找到它；使用中遇到问题，欢迎提交 [Issue](https://github.com/JJosephph/ms-edge-tts-gui/issues) 或 PR。
 
-> **English**: This project is **free and open source (MIT License)**, developed by **WangYufan**.
+> **English**: This project is **free and open source (MIT License)**, developed by **WangYufan** (QQ 1471056247).
 > Repository: https://github.com/JJosephph/ms-edge-tts-gui
 > If this tool helps you, please **Star** the repository first so more users can discover it; issues and pull requests are welcome.
 
@@ -238,8 +238,8 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.0.5
-git push origin v1.0.5
+git tag v1.0.6
+git push origin v1.0.6
 ```
 
 ## Privacy and Service Notice
@@ -257,5 +257,5 @@ Issues, feature requests, and pull requests are welcome. If this project helps y
 
 Released under the [MIT License](LICENSE) · 中文版见 [LICENSE.zh.txt](LICENSE.zh.txt).
 
-- **Maintainer:** WangYufan
+- **Maintainer:** WangYufan（QQ 1471056247）
 - **Repository:** https://github.com/JJosephph/ms-edge-tts-gui

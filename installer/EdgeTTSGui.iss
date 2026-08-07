@@ -6,7 +6,7 @@
 
 #define MyAppName "Edge TTS 语音合成助手"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #endif
 #define MyAppPublisher "WangYufan"
 #define MyAppExeName "EdgeTTSGui.exe"
@@ -22,7 +22,7 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppComments=Free open-source software (MIT License) / 免费开源软件（MIT License）
-AppCopyright=Copyright (c) 2026 WangYufan
+AppCopyright=Copyright (c) 2026 WangYufan (QQ 1471056247)
 DefaultDirName={autopf}\EdgeTTSGui
 DisableProgramGroupPage=yes
 OutputDir=..\dist
@@ -63,7 +63,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
-Filename: "{#MyAppURL}"; Description: "Open GitHub and Star the open-source project / 打开 GitHub 为开源项目点 Star"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{#MyAppURL}"; Description: "Open GitHub and Star the open-source project / 打开 GitHub 为开源项目点 Star"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -79,7 +79,7 @@ begin
     if IsZh then
     begin
       WizardForm.WelcomeLabel1.Caption := '欢迎安装 {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：WangYufan。' + #13#10 + #13#10 +
+      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：WangYufan（QQ 1471056247）。' + #13#10 + #13#10 +
         '已内置 Python 运行环境，无需额外安装，装完即可使用。' + #13#10 + #13#10 +
         '仓库地址：https://github.com/JJosephph/ms-edge-tts-gui' + #13#10 +
         '点击“下一步”选择安装位置（任意磁盘或文件夹），然后开始安装。';
@@ -87,7 +87,7 @@ begin
     else
     begin
       WizardForm.WelcomeLabel1.Caption := 'Welcome to {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (MIT License) by WangYufan.' + #13#10 + #13#10 +
+      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (MIT License) by WangYufan (QQ 1471056247).' + #13#10 + #13#10 +
         'No Python required - the runtime is bundled. Install & use right away.' + #13#10 + #13#10 +
         'Repository: https://github.com/JJosephph/ms-edge-tts-gui' + #13#10 +
         'Click Next to choose an install location (any drive), then install.';
