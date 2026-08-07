@@ -1,6 +1,6 @@
 # Release Notes
 
-## v1.1.0
+## v1.0.4
 
 ### New and improved
 
@@ -9,7 +9,7 @@
 - Generated audio is automatically invalidated when text, voice, rate, volume, or pitch changes, so Play/Save always match the current settings.
 - Fixed the Inno Setup installer encoding (UTF-8 with BOM) so the Chinese app name renders correctly; the wizard now shows **免费开源 / Free & Open Source (MIT License)** and **developer WangYufan**, is bilingual (中文 / English), and keeps full uninstall support.
 - Added a bilingual **“求点赞 · 请先读我 / Star Us · Please Read First”** section with the repository address to the README.
-- Updated README and release notes for v1.1.0.
+- Updated README and release notes for v1.0.4.
 
 ## v1.0.3
 
