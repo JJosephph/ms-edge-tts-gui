@@ -22,7 +22,8 @@ import aiohttp
 import edge_tts
 
 # ---------------------------------------------------------------- 常量
-STALL_TIMEOUT = 15            # 连续多少秒没有新音频分片 -> 判定卡住
+STALL_TIMEOUT = 20            # 连续多少秒没有新音频分片 -> 首次提示卡住
+STALL_WAIT_GRACE = 60         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
 STALL_DECISION_TIMEOUT = 90   # 卡住后等待用户决定的最长时间（秒）
 CONNECT_TIMEOUT = 10          # edge-tts 建连超时
 RECEIVE_TIMEOUT = 120         # edge-tts 单次接收超时（兜底）
@@ -224,27 +225,49 @@ class TTSEngine:
         self.on_progress(percent, written)
         try:
             iterator = communicate.stream()
+            next_chunk = None
+            keep_waiting = False
             with open(temp_path, "wb") as audio_file:
                 while True:
                     if self.cancel_event.is_set():
+                        if next_chunk is not None:
+                            next_chunk.cancel()
                         raise UserCanceled()
+                    if next_chunk is None:
+                        next_chunk = asyncio.ensure_future(anext(iterator))
+                    wait_window = STALL_WAIT_GRACE if keep_waiting else STALL_TIMEOUT
                     try:
-                        chunk = await asyncio.wait_for(
-                            anext(iterator), timeout=STALL_TIMEOUT
+                        done, _pending = await asyncio.wait(
+                            {next_chunk}, timeout=wait_window
                         )
-                    except StopAsyncIteration:
-                        break
-                    except asyncio.TimeoutError:
+                    except asyncio.CancelledError:
+                        raise
+                    if done:
+                        try:
+                            chunk = next_chunk.result()
+                        except StopAsyncIteration:
+                            break
+                        next_chunk = None
+                        keep_waiting = False
+                    else:
+                        # 超时仍未收到新数据
+                        if keep_waiting:
+                            # 用户已选择“继续等待”：不重复弹窗，继续等这个分片
+                            continue
                         decision = await self._ask_stall(
                             "生成似乎卡住了：长时间没有收到新的音频数据。"
                             "可能是网络不通或代理设置不正确。要重试吗？"
                         )
                         if decision == "cancel":
+                            next_chunk.cancel()
                             raise UserCanceled()
                         if decision == "retry":
+                            next_chunk.cancel()
                             self._safe_unlink(temp_path)
                             return "retry"
-                        continue  # 用户选择继续等待
+                        # 用户选择继续等待：放宽再次提醒的时间，不再反复打扰
+                        keep_waiting = True
+                        continue
 
                     chunk_type = chunk.get("type")
                     if chunk_type == "audio":
