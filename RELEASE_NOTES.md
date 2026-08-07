@@ -1,5 +1,12 @@
 # Release Notes
 
+## v1.0.5
+
+### New and improved
+
+- Added a Chinese version of the MIT License (`LICENSE.zh.txt`); the installer now shows the Chinese license when 中文 is selected, and the copyright is unified to **WangYufan**.
+- Refreshed the README interface screenshots with real captures of the new Generate → Play / Save UI.
+
 ## v1.0.4
 
 ### New and improved
