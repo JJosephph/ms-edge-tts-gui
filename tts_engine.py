@@ -37,6 +37,123 @@ def estimate_spoken_units(text: str) -> int:
     units = re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+(?:['’\-][A-Za-z0-9]+)?", text)
     return max(1, len(units))
 
+# ---------------------------------------------------------------- 时间轴 JSON（.timeline.json）
+
+SENTENCE_ABBREVIATIONS = {
+    "mr", "mrs", "ms", "dr", "rev", "st", "prof", "sr", "jr",
+    "vs", "cf", "e.g", "i.e", "etc",
+}
+
+
+def split_reading_sentences(text: str) -> list:
+    """按 . ! ? 切分句子（带常见缩写保护），也兼容中文标点。"""
+    sentences: list = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        value = re.sub(r"\s+", " ", line).strip()
+        if not value:
+            continue
+        start = 0
+        i = 0
+        while i < len(value):
+            char = value[i]
+            if char not in ".!?\u3002\uff01\uff1f":
+                i += 1
+                continue
+            if char == "." and _is_abbreviation_boundary(value, i):
+                i += 1
+                continue
+            end = i + 1
+            while end < len(value) and value[end] in ".!?\u3002\uff01\uff1f":
+                end += 1
+            while end < len(value) and value[end] in "\"')\u2019\u201d\u300d\u3011]":
+                end += 1
+            sentence = value[start:end].strip()
+            if sentence:
+                sentences.append(sentence)
+            start = end
+            while start < len(value) and value[start].isspace():
+                start += 1
+            i = start
+        tail = value[start:].strip()
+        if tail:
+            sentences.append(tail)
+    return sentences
+
+
+def _is_abbreviation_boundary(text: str, dot_index: int) -> bool:
+    prefix = text[:dot_index].rstrip()
+    match = re.search(r"([A-Za-z](?:[A-Za-z]|\.)*)$", prefix)
+    if not match:
+        return False
+    token = match.group(1).lower().strip(".")
+    if token in SENTENCE_ABBREVIATIONS:
+        return True
+    if len(token) == 1 and token.isalpha():
+        return True
+    return False
+
+
+def count_spoken_words(text: str) -> int:
+    """近似统计一句话会被朗读的“词”数：拉丁词 + 单个中文字符。"""
+    words = re.findall(
+        r"[\u4e00-\u9fff]|[A-Za-z0-9]+(?:['\u2019\u2013-][A-Za-z0-9]+)?",
+        text,
+    )
+    return max(1, len(words))
+
+
+def seconds_from_edge_ticks(value: object) -> float:
+    try:
+        return max(0.0, float(value) / 10000000.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_sentence_timeline(
+    text: str, word_boundaries: list, voice: str, rate: str
+) -> dict:
+    """把 edge-tts 的 WordBoundary 词级时间近似映射为句子级起止时间。"""
+    sentences = split_reading_sentences(text)
+    entries = []
+    boundary_count = len(word_boundaries)
+    cursor = 0
+    for index, sentence in enumerate(sentences):
+        word_count = count_spoken_words(sentence)
+        start_boundary_index = min(cursor, max(0, boundary_count - 1))
+        end_boundary_index = min(cursor + word_count - 1, max(0, boundary_count - 1))
+        if boundary_count > 0:
+            start_boundary = word_boundaries[start_boundary_index]
+            end_boundary = word_boundaries[end_boundary_index]
+            start = seconds_from_edge_ticks(start_boundary.get("offset", 0))
+            end = seconds_from_edge_ticks(end_boundary.get("offset", 0)) + seconds_from_edge_ticks(
+                end_boundary.get("duration", 0)
+            )
+            if end <= start:
+                end = start + 0.25
+        else:
+            start = 0.0
+            end = 0.0
+        entries.append(
+            {
+                "index": index,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "word_count": word_count,
+                "text": sentence,
+            }
+        )
+        cursor += word_count
+    return {
+        "version": 1,
+        "kind": "sentence",
+        "engine": "edge-tts",
+        "voice": voice,
+        "rate": rate,
+        "sentences": entries,
+    }
+
+
+
 # edge-tts 使用的真实服务地址（用于网络探测，最贴近真实链路）
 PROBE_URL = "https://speech.platform.bing.com/"
 
@@ -170,6 +287,8 @@ class TTSEngine:
         self.controller = controller
         self.cancel_event = cancel_event or threading.Event()
         self.proxy = detect_proxy()
+        self.word_boundaries: list = []
+        self.timeline: Optional[dict] = None
 
     # ---------------- 对外入口 ----------------
 
@@ -204,6 +323,7 @@ class TTSEngine:
         """执行一次流式生成，返回 'done' | 'cancel' | 'retry'。"""
         temp_path = self._temp_path(output_path)
         self._safe_unlink(temp_path)
+        self.word_boundaries = []
 
         communicate = edge_tts.Communicate(
             text=text,
@@ -280,6 +400,7 @@ class TTSEngine:
                             last_report = now
                             self.on_progress(percent, written)
                     elif chunk_type == "WordBoundary":
+                        self.word_boundaries.append(chunk)
                         completed_units += 1
                         percent = min(99, int(completed_units * 100 / total_units))
                         now = time.perf_counter()
@@ -293,6 +414,13 @@ class TTSEngine:
             final_path = os.path.abspath(output_path)
             os.makedirs(os.path.dirname(final_path), exist_ok=True)
             self._safe_replace(temp_path, final_path)
+            self.timeline = (
+                build_sentence_timeline(
+                    text, self.word_boundaries, cfg.voice, cfg.rate
+                )
+                if self.word_boundaries
+                else None
+            )
             self.on_progress(100, written)
             return "done"
 

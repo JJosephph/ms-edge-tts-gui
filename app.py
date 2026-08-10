@@ -37,7 +37,7 @@ from tts_engine import (
 from text_utils import clean_text, default_filename, normalize_for_tts
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -129,6 +129,8 @@ class App(ctk.CTk):
         self._selected_voice_code = DEFAULT_VOICE
         self._generated_path: str | None = None
         self._generated_text: str | None = None
+        self._timeline_enabled = bool(self._settings.get("timeline_json", False))
+        self._generated_timeline: dict | None = None
 
         self._build_ui()
         self._bind_events()
@@ -295,7 +297,7 @@ class App(ctk.CTk):
         is_english = self._language == "en"
         dialog = ctk.CTkToplevel(self)
         dialog.title("Settings" if is_english else "设置")
-        dialog.geometry("610x300")
+        dialog.geometry("610x372")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
@@ -315,6 +317,25 @@ class App(ctk.CTk):
         row.grid_columnconfigure(0, weight=1)
         entry = ctk.CTkEntry(row, textvariable=path_var, height=34)
         entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        timeline_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        timeline_row.grid(row=3, column=0, sticky="w", padx=22, pady=(16, 0))
+        timeline_var = tk.BooleanVar(value=self._timeline_enabled)
+
+        def toggle_timeline():
+            self._timeline_enabled = bool(timeline_var.get())
+            self._settings["timeline_json"] = self._timeline_enabled
+            self._save_settings()
+
+        ctk.CTkCheckBox(
+            timeline_row,
+            text="Also save a .timeline.json beside the MP3 (sentence start/end times)"
+            if is_english
+            else "保存音频时同时输出时间轴 JSON（句子起止时间 .timeline.json）",
+            variable=timeline_var,
+            command=toggle_timeline,
+            font=self._font(size=13),
+        ).pack(side="left")
+
 
         def choose_directory():
             chosen = filedialog.askdirectory(title="Select generated audio cache folder" if is_english else "选择生成音频缓存目录", initialdir=path_var.get() or os.path.expanduser("~"))
@@ -356,7 +377,7 @@ class App(ctk.CTk):
             messagebox.showinfo(self._app_name(), "Generated audio cache cleared." if is_english else "生成音频缓存已清理。")
 
         buttons = ctk.CTkFrame(dialog, fg_color="transparent")
-        buttons.grid(row=3, column=0, sticky="e", padx=22, pady=(20, 8))
+        buttons.grid(row=4, column=0, sticky="e", padx=22, pady=(18, 8))
         ctk.CTkButton(buttons, text="Open folder" if is_english else "打开目录", width=104, fg_color="#3a4358", hover_color="#4a546c", command=lambda: os.startfile(self._preview_dir)).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Clear generated audio cache" if is_english else "清理生成缓存", width=150, fg_color="#3a4358", hover_color="#4a546c", command=clear_preview).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Save" if is_english else "保存", width=86, command=save_directory).pack(side="left", padx=4)
@@ -811,11 +832,13 @@ class App(ctk.CTk):
         except Exception as exc:  # noqa: BLE001
             result = {"status": "error", "error": str(exc)}
         result["text"] = task.text
+        result["timeline"] = getattr(engine, "timeline", None)
         self._ui_q.put(("task_done", task.mode, result))
 
     def _on_task_done(self, mode, result):
         self._busy = False
         self._set_busy_ui(False)
+        self._generated_timeline = None
 
         status = result.get("status")
         if status == "done":
@@ -829,6 +852,7 @@ class App(ctk.CTk):
             path = result["path"]
             self._generated_path = path
             self._generated_text = generated_text
+            self._generated_timeline = result.get("timeline")
             size_kb = os.path.getsize(path) / 1024 if os.path.exists(path) else 0
             self._progress.set(1.0)
             self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
@@ -891,6 +915,15 @@ class App(ctk.CTk):
             messagebox.showerror(APP_NAME, f"保存失败：{exc}")
             return
         self.log(f"[保存] 音频已保存：{path}")
+        if self._timeline_enabled and self._generated_timeline:
+            try:
+                timeline_path = os.path.splitext(path)[0] + ".timeline.json"
+                with open(timeline_path, "w", encoding="utf-8") as timeline_file:
+                    json.dump(self._generated_timeline, timeline_file, ensure_ascii=False, indent=2)
+                self.log(f"[保存] 时间轴 JSON 已保存：{timeline_path}")
+            except OSError as exc:
+                self.log(f"[警告] 时间轴 JSON 保存失败：{exc}")
+
         self._maybe_open_folder(path)
 
     def _on_stop(self):
@@ -1058,6 +1091,7 @@ class App(ctk.CTk):
     def _invalidate_generated(self):
         self._generated_path = None
         self._generated_text = None
+        self._generated_timeline = None
         self._sync_generated_status()
         self._update_generated_buttons()
 

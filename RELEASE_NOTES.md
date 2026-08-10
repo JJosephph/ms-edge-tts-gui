@@ -1,5 +1,12 @@
 # Release Notes
 
+## v1.0.9
+
+### New
+
+- New toggle in Settings (????): **"Save a .timeline.json beside the MP3"**. When enabled, saving/downloading an MP3 also writes a sentence-timeline JSON with the same base name (e.g. `my-audio.timeline.json`), listing each sentence's start/end seconds built from Edge TTS word-boundary metadata ? no extra render is needed.
+
+
 ## v1.0.8
 
 ### Improved
