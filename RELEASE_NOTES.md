@@ -1,10 +1,20 @@
 # Release Notes
 
+## v1.1.0
+
+### New
+
+- **Multi-level voice picker**: voices are fetched from the server once and grouped locally into Language ? Gender ? Voice (a dedicated grouping engine). Language and gender filter drop-downs replace the long single voice list; the default stays **Andrew (en-US, male)**, and any voice is one short step away.
+- **Timeline JSON + playback highlight**: the timeline option is now a first-class toggle on the main UI (not hidden in Settings) with a " ? " help button showing a sample `.timeline.json` and a live highlight demo. When enabled, saving/downloading an MP3 also writes a `.timeline.json` (sentence start/end seconds), and during Play the sentence being read is highlighted in the article in real time.
+- **Restore defaults button**: renamed to "恢复初始设置 / Restore defaults" and restyled to match the rest of the UI; it resets the voice to Andrew and rate/volume/pitch to +0%/+0%/+0Hz.
+- Fixed the Markdown/plain-text helper text that overflowed the composer panel; it now wraps cleanly.
+
+
 ## v1.0.9
 
 ### New
 
-- New toggle in Settings (????): **"Save a .timeline.json beside the MP3"**. When enabled, saving/downloading an MP3 also writes a sentence-timeline JSON with the same base name (e.g. `my-audio.timeline.json`), listing each sentence's start/end seconds built from Edge TTS word-boundary metadata ? no extra render is needed.
+- New toggle in Settings (设置): **"Save a .timeline.json beside the MP3"**. When enabled, saving/downloading an MP3 also writes a sentence-timeline JSON with the same base name (e.g. `my-audio.timeline.json`), listing each sentence's start/end seconds built from Edge TTS word-boundary metadata — no extra render is needed.
 
 
 ## v1.0.8

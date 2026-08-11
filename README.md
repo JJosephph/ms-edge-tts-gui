@@ -41,9 +41,11 @@
 
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
+- **时间轴 JSON + 试听高亮**：主界面勾选后，保存/下载时输出同名 `.timeline.json`（每句起止秒数）；试听时正在朗读的句子会在文章中实时高亮。
 - **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
-- **语音库**：支持 Microsoft Edge 大量声音，中文模式会翻译语言、地区和性别标签。
-- **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；另有推荐中文女声 `zh-CN-XiaoxiaoNeural`。
+- **三级语音选择**：语音一次性从远端拉取后在本地按 **语言 → 性别 → 音色** 分组（内置分组引擎），不用再大海捞针；默认保留 `en-US-AndrewMultilingualNeural`（英语男声），可随时自选。
+- **音色自然丰富**：支持几百种语言、数百个音色，男声、女声都非常丰富；无论中文、粤语、英语还是其他外语，都是十分自然的 TTS 朗读，不是机器音——用过 Edge 朗读功能的人都懂。
+- **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；「恢复初始设置」可一键还原。
 - **不占空间**：生成的音频只保存在一个临时 MP3 里，可自定义目录、打开或清理，关闭软件时自动删除。
 
 ### 中文界面预览
@@ -93,8 +95,10 @@ The project is designed as a general-purpose open-source tool. It includes pract
 | **Text to MP3** | Paste Markdown, plain text, or HTML-derived text and export a full MP3 file. |
 | **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. |
 | **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
-| **Voice catalog** | Loads hundreds of Edge voices; Chinese mode renders locale and gender labels in Chinese, while English mode preserves Microsoft’s original naming. |
+| **Multi-level voice picker** | Voices are fetched once and grouped locally into **Language → Gender → Voice** (built-in grouping engine) — no more scrolling a giant list. Male/female voices are rich across hundreds of languages; Chinese, Cantonese, English and more all sound natural, never robotic. |
 | **Original workflow compatibility** | Default settings mirror the existing RPA workflow: `en-US-AndrewMultilingualNeural`, rate `+0%`, volume `+0%`, pitch `+0Hz`. |
+| **Timeline JSON + highlight** | Optional one-click toggle on the main UI: saving/downloading also writes a `.timeline.json` with each sentence's start/end seconds, and during Play the sentence being read is highlighted live in the article. A " ? " help button shows a JSON example and a highlight demo. |
+| **Restore defaults** | The voice-deck button resets voice to `en-US-AndrewMultilingualNeural` and rate/volume/pitch to `+0%`/`+0%`/`+0Hz` in one click. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
 | **Network protection** | Checks Edge TTS service availability and detects proxy environment variables before generation. |
 | **Stall recovery** | If audio stops arriving, offers **Keep waiting**, **Retry**, or **Cancel** with a network/proxy explanation. |
@@ -146,7 +150,7 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 ## Using the App
 
 1. **Paste your text** into the Composer panel.
-2. **Choose a voice** from the Voice Deck. The default already matches the existing RPA configuration; use **Restore workflow defaults** at any time.
+2. **Choose a voice** from the Voice Deck — pick **Language**, then **Gender**, then the final **Voice** from the filtered list. The default is the English male voice `en-US-AndrewMultilingualNeural`; use **Restore defaults** at any time to reset voice and rate/volume/pitch.
 3. **Adjust rate, volume, and pitch** if needed.
 4. Click **Generate Audio** to synthesize the full text once.
 5. After generation, click **▶ Play** to listen, or **Save Audio** to export the MP3 — both reuse the generated audio with no re-rendering.
@@ -161,7 +165,7 @@ HTTPS_PROXY   HTTP_PROXY   ALL_PROXY
 https_proxy   http_proxy   all_proxy
 ```
 
-If the service cannot be reached, the app reports the condition in the Activity log. If a generation stalls (no new audio data for 15 seconds), it presents a recovery dialog:
+If the service cannot be reached, the app reports the condition in the Activity log. If a generation stalls (no new audio data for 3 minutes), it presents a recovery dialog:
 
 - **Keep waiting** — for a short-lived slow connection;
 - **Retry** — starts the current synthesis again (up to three attempts);
@@ -199,7 +203,7 @@ Volume:  +0%
 Pitch:   +0Hz
 ```
 
-This lets existing users of the related RPA workflow start synthesizing immediately without re-entering settings. For a Chinese female voice, select the recommended `zh-CN-XiaoxiaoNeural` entry.
+This lets existing users of the related RPA workflow start synthesizing immediately without re-entering settings; the deck's **Restore defaults** button returns to this preset in one click. For a Chinese female voice, pick 中文 → 女声 → 晓晓 (`zh-CN-XiaoxiaoNeural`).
 
 ## Project Structure
 
@@ -208,6 +212,8 @@ ms-edge-tts-gui/
 ├── app.py                       # Desktop UI, themes, localization, cache settings
 ├── tts_engine.py                # Edge TTS streaming, progress, network and stall handling
 ├── text_utils.py                # Markdown/HTML cleanup and preview text extraction
+├── voice_groups.py              # Local grouping engine: Language → Gender → Voice
+
 ├── assets/                      # Icon and README interface previews
 ├── installer/EdgeTTSGui.iss     # Inno Setup installer definition
 ├── run.bat                      # Windows source launcher
@@ -238,8 +244,8 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.0.9
-git push origin v1.0.9
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## Privacy and Service Notice

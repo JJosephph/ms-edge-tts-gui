@@ -6,7 +6,7 @@
 
 #define MyAppName "Edge TTS 语音合成助手"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.9"
+#define MyAppVersion "1.1.0"
 #endif
 #define MyAppPublisher "WangYufan"
 #define MyAppExeName "EdgeTTSGui.exe"

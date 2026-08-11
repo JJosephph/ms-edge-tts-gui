@@ -18,6 +18,7 @@ import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import customtkinter as ctk
 import pygame
@@ -35,9 +36,16 @@ from tts_engine import (
     probe_network,
 )
 from text_utils import clean_text, default_filename, normalize_for_tts
+from voice_groups import (
+    GENDER_ALL,
+    GENDER_FEMALE,
+    GENDER_MALE,
+    GENDER_OTHER,
+    VoiceGroupingEngine,
+)
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -71,20 +79,6 @@ DEFAULT_RATE = 0
 DEFAULT_VOLUME = 0
 DEFAULT_PITCH = 0
 
-CURATED_VOICES = [
-    ("推荐 · 兼容原工作流（Andrew）", "en-US-AndrewMultilingualNeural"),
-    ("推荐 · 中文女声 晓晓", "zh-CN-XiaoxiaoNeural"),
-    ("中文 · 晓伊（女）", "zh-CN-XiaoyiNeural"),
-    ("中文 · 云希（男）", "zh-CN-YunxiNeural"),
-    ("中文 · 云健（男）", "zh-CN-YunjianNeural"),
-    ("English · Aria (US)", "en-US-AriaNeural"),
-    ("English · Jenny (US)", "en-US-JennyNeural"),
-    ("English · Aria (US)", "en-US-AriaNeural"),
-    ("English · Jenny (US)", "en-US-JennyNeural"),
-    ("English · Ryan (GB)", "en-GB-RyanNeural"),
-    ("日本語 · Nanami", "ja-JP-NanamiNeural"),
-    ("한국어 · SunHi", "ko-KR-SunHiNeural"),
-]
 
 ctk.ThemeManager.theme["CTkFont"]["family"] = UI_FONT_FAMILY
 ctk.set_appearance_mode("dark")
@@ -124,13 +118,20 @@ class App(ctk.CTk):
         self._cleanup_preview_file()
 
         self._voice_map: dict = {}
-        self._search_text = ""
+        self._groups_engine: Optional[VoiceGroupingEngine] = None
         self._language = "zh"
+        self._selected_lang = "en"
+        self._selected_gender = "Male"
+        self._lang_map: dict = {}
+        self._gender_map: dict = {}
         self._selected_voice_code = DEFAULT_VOICE
         self._generated_path: str | None = None
         self._generated_text: str | None = None
         self._timeline_enabled = bool(self._settings.get("timeline_json", False))
         self._generated_timeline: dict | None = None
+        self._timeline_var = None
+        self._highlight_running = False
+        self._highlight_ranges: list = []
 
         self._build_ui()
         self._bind_events()
@@ -163,11 +164,28 @@ class App(ctk.CTk):
         "network_bad": {"zh": "●  网络异常", "en": "●  Network unavailable"},
         "article": {"zh": "文章内容", "en": "Article"},
         "count": {"zh": "字数：{count}", "en": "Characters: {count}"},
-        "helper": {"zh": "支持 Markdown / 纯文本；生成一次全文音频，之后可随时试听或保存下载，无需重复合成。", "en": "Markdown and plain text supported; synthesize once, then play or save anytime without re-rendering."},
+        "helper": {"zh": "支持 Markdown / 纯文本；一次生成全文音频，之后可随时试听或保存下载。", "en": "Markdown & plain text supported; synthesize once, then play or save anytime."},
         "voice": {"zh": "语音", "en": "Voice"},
+        "lang": {"zh": "语言", "en": "Language"},
+        "gender": {"zh": "性别", "en": "Gender"},
+        "gender_all": {"zh": "全部", "en": "All"},
+        "gender_female": {"zh": "女声", "en": "Female"},
+        "gender_male": {"zh": "男声", "en": "Male"},
+        "gender_other": {"zh": "其他", "en": "Other"},
+        "timeline": {"zh": "时间轴 JSON + 试听高亮", "en": "Timeline JSON + highlight"},
+        "timeline_help_title": {"zh": "时间轴 JSON 与试听高亮", "en": "Timeline JSON & Playback Highlight"},
+        "timeline_help_desc": {"zh": "开启后：① 保存/下载音频时，会同时输出同名 .timeline.json（每个句子的起止秒数）；② 试听播放时，正在朗读的句子会在文章中实时高亮。时间轴来自生成时微软 TTS 返回的逐词时间，无需再次合成。", "en": "When enabled: 1) saving/downloading audio also writes a .timeline.json with each sentence's start/end seconds; 2) during playback, the sentence being read is highlighted live. The timeline is built from Microsoft TTS word-boundary data captured at generation time - no re-rendering needed."},
+        "timeline_help_json_title": {"zh": "示例 .timeline.json", "en": "Example .timeline.json"},
+        "timeline_help_highlight_title": {"zh": "高亮演示（试听时实时跟随）", "en": "Highlight demo (follows live during playback)"},
+        "timeline_help_demo_btn": {"zh": "▶ 演示高亮", "en": "▶ Demo highlight"},
+        "timeline_help_demo_text": {"zh": "第一句：大家好，欢迎使用本工具。第二句：这一句正在被高亮显示。第三句：播放到哪一句，哪一句就会亮起来。", "en": "First sentence: welcome to this tool. Second sentence: this sentence is now highlighted. Third sentence: the sentence being spoken lights up."},
+        "timeline_help_note": {"zh": "提示：高亮在点击「试听」后开始，随播放进度逐句跳转；JSON 与音频一起保存在你选择的目录。", "en": "Tip: highlighting starts when you click Play and follows the progress; the JSON is saved next to the audio file."},
+        "timeline_on": {"zh": "已开启：保存时输出时间轴 JSON，试听时高亮当前句子", "en": "On: saves a timeline JSON with audio; highlights the sentence being read"},
+        "timeline_off": {"zh": "已关闭：不再输出时间轴 JSON 与试听高亮", "en": "Off: no timeline JSON or playback highlight"},
+
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
         "original": {"zh": "原工作流默认：Andrew Multilingual · 语速 +0% · 音量 +0% · 音调 +0Hz", "en": "Original workflow: Andrew Multilingual · rate +0% · volume +0% · pitch +0Hz"},
-        "restore": {"zh": "恢复原工作流默认", "en": "Restore workflow defaults"},
+        "restore": {"zh": "恢复初始设置", "en": "Restore defaults"},
         "reset_compact": {"zh": "恢复", "en": "Reset"},
         "rate": {"zh": "语速", "en": "Rate"},
         "volume": {"zh": "音量", "en": "Volume"},
@@ -297,7 +315,7 @@ class App(ctk.CTk):
         is_english = self._language == "en"
         dialog = ctk.CTkToplevel(self)
         dialog.title("Settings" if is_english else "设置")
-        dialog.geometry("610x372")
+        dialog.geometry("610x300")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
@@ -317,25 +335,6 @@ class App(ctk.CTk):
         row.grid_columnconfigure(0, weight=1)
         entry = ctk.CTkEntry(row, textvariable=path_var, height=34)
         entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        timeline_row = ctk.CTkFrame(dialog, fg_color="transparent")
-        timeline_row.grid(row=3, column=0, sticky="w", padx=22, pady=(16, 0))
-        timeline_var = tk.BooleanVar(value=self._timeline_enabled)
-
-        def toggle_timeline():
-            self._timeline_enabled = bool(timeline_var.get())
-            self._settings["timeline_json"] = self._timeline_enabled
-            self._save_settings()
-
-        ctk.CTkCheckBox(
-            timeline_row,
-            text="Also save a .timeline.json beside the MP3 (sentence start/end times)"
-            if is_english
-            else "保存音频时同时输出时间轴 JSON（句子起止时间 .timeline.json）",
-            variable=timeline_var,
-            command=toggle_timeline,
-            font=self._font(size=13),
-        ).pack(side="left")
-
 
         def choose_directory():
             chosen = filedialog.askdirectory(title="Select generated audio cache folder" if is_english else "选择生成音频缓存目录", initialdir=path_var.get() or os.path.expanduser("~"))
@@ -377,7 +376,7 @@ class App(ctk.CTk):
             messagebox.showinfo(self._app_name(), "Generated audio cache cleared." if is_english else "生成音频缓存已清理。")
 
         buttons = ctk.CTkFrame(dialog, fg_color="transparent")
-        buttons.grid(row=4, column=0, sticky="e", padx=22, pady=(18, 8))
+        buttons.grid(row=3, column=0, sticky="e", padx=22, pady=(20, 8))
         ctk.CTkButton(buttons, text="Open folder" if is_english else "打开目录", width=104, fg_color="#3a4358", hover_color="#4a546c", command=lambda: os.startfile(self._preview_dir)).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Clear generated audio cache" if is_english else "清理生成缓存", width=150, fg_color="#3a4358", hover_color="#4a546c", command=clear_preview).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Save" if is_english else "保存", width=86, command=save_directory).pack(side="left", padx=4)
@@ -406,7 +405,7 @@ class App(ctk.CTk):
         self._bind_events()
         if text:
             self._textbox.insert("1.0", text)
-        self._refresh_voice_combo()
+        self._refresh_voice_selectors()
         self._on_text_changed()
         self.after(150, self._poll_ui)
 
@@ -489,26 +488,78 @@ class App(ctk.CTk):
         self._char_count.pack(side="right")
         self._textbox = ctk.CTkTextbox(composer, wrap="word", corner_radius=14, fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=14))
         self._textbox.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 8))
-        ctk.CTkLabel(composer, text=self._t("helper"), text_color=self._c("muted"), anchor="w").grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 14))
+        ctk.CTkLabel(composer, text=self._t("helper"), text_color=self._c("muted"), anchor="w", justify="left", wraplength=520, font=self._font(size=12)).grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 14))
 
         deck = ctk.CTkFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
         deck.grid(row=0, column=1, sticky="ns")
         deck.grid_columnconfigure(0, weight=1)
+
         ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
-        self._voice_search = ctk.CTkEntry(deck, placeholder_text=self._t("search"), height=30, font=self._font(size=13), fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), placeholder_text_color=self._c("muted"))
-        self._voice_search.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 4))
+
+        # 语言 / 性别 二级筛选
+        selectors = ctk.CTkFrame(deck, fg_color="transparent")
+        selectors.grid(row=1, column=0, sticky="ew", padx=18)
+        selectors.grid_columnconfigure(0, weight=3)
+        selectors.grid_columnconfigure(1, weight=2)
+        lang_cell = ctk.CTkFrame(selectors, fg_color="transparent")
+        lang_cell.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ctk.CTkLabel(lang_cell, text=self._t("lang"), text_color=self._c("muted"), font=self._font(size=10, weight="bold")).pack(anchor="w")
+        self._lang_var = tk.StringVar(value="")
+        self._lang_combo = ctk.CTkComboBox(
+            lang_cell, values=[], variable=self._lang_var, height=30,
+            fg_color=self._c("field"), border_color=self._c("border"),
+            button_color=self._c("primary"), button_hover_color=self._c("primary_hover"),
+            text_color=self._c("text"), dropdown_fg_color=self._c("surface"),
+            dropdown_hover_color=self._c("card_raised"),
+            font=self._font(size=12), dropdown_font=self._font(size=12),
+            command=self._on_language_changed,
+        )
+        self._lang_combo.pack(fill="x")
+
+        gender_cell = ctk.CTkFrame(selectors, fg_color="transparent")
+        gender_cell.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        ctk.CTkLabel(gender_cell, text=self._t("gender"), text_color=self._c("muted"), font=self._font(size=10, weight="bold")).pack(anchor="w")
+        self._gender_var = tk.StringVar(value="")
+        self._gender_combo = ctk.CTkComboBox(
+            gender_cell, values=[], variable=self._gender_var, height=30,
+            fg_color=self._c("field"), border_color=self._c("border"),
+            button_color=self._c("primary"), button_hover_color=self._c("primary_hover"),
+            text_color=self._c("text"), dropdown_fg_color=self._c("surface"),
+            dropdown_hover_color=self._c("card_raised"),
+            font=self._font(size=12), dropdown_font=self._font(size=12),
+            command=self._on_gender_changed,
+        )
+        self._gender_combo.pack(fill="x")
+
+        # 音色 最终列表
         self._voice_var = tk.StringVar(value=self._display_name(self._selected_voice_code))
-        self._voice_combo = ctk.CTkComboBox(deck, values=[self._display_name(code) for _, code in CURATED_VOICES], variable=self._voice_var, height=32, fg_color=self._c("field"), border_color=self._c("border"), button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), text_color=self._c("text"), dropdown_fg_color=self._c("surface"), dropdown_hover_color=self._c("card_raised"), font=self._font(size=13), dropdown_font=self._font(size=13), command=self._on_voice_changed)
-        self._voice_combo.grid(row=2, column=0, sticky="ew", padx=18)
+        self._voice_combo = ctk.CTkComboBox(
+            deck, values=[self._voice_var.get()], variable=self._voice_var, height=32,
+            fg_color=self._c("field"), border_color=self._c("border"),
+            button_color=self._c("primary"), button_hover_color=self._c("primary_hover"),
+            text_color=self._c("text"), dropdown_fg_color=self._c("surface"),
+            dropdown_hover_color=self._c("card_raised"),
+            font=self._font(size=13), dropdown_font=self._font(size=13),
+            command=self._on_voice_changed,
+        )
+        self._voice_combo.grid(row=2, column=0, sticky="ew", padx=18, pady=(6, 5))
+
         voice_details = ctk.CTkFrame(deck, fg_color="transparent")
-        voice_details.grid(row=3, column=0, sticky="ew", padx=18, pady=(2, 5))
+        voice_details.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 3))
         voice_details.grid_columnconfigure(0, weight=1)
         self._voice_info = ctk.CTkLabel(voice_details, text="", text_color=self._c("muted"), anchor="w", font=self._font(size=11))
         self._voice_info.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(voice_details, text=self._t("reset_compact"), width=42, height=25, font=self._font(size=11), fg_color="transparent", border_width=1, border_color=self._c("border"), hover_color=self._c("card_raised"), text_color=self._c("muted"), command=self._restore_original_defaults).grid(row=0, column=1, padx=(6, 0))
+        ctk.CTkButton(voice_details, text=self._t("restore"), width=118, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._restore_default_settings).grid(row=0, column=1, padx=(8, 0))
+
+        # 时间轴 JSON + 试听高亮（主界面常驻选项）
+        timeline_row = ctk.CTkFrame(deck, fg_color="transparent")
+        timeline_row.grid(row=4, column=0, sticky="ew", padx=18, pady=(2, 4))
+        self._timeline_var = tk.BooleanVar(value=self._timeline_enabled)
+        ctk.CTkCheckBox(timeline_row, text=self._t("timeline"), variable=self._timeline_var, command=self._toggle_timeline, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary")).pack(side="left")
+        ctk.CTkButton(timeline_row, text=" ? ", width=30, height=24, font=self._font(size=12, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._show_timeline_help).pack(side="left", padx=(6, 0))
 
         parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
-        parameters.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 7))
+        parameters.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 7))
         for column in range(3):
             parameters.grid_columnconfigure(column, weight=1, uniform="voice_control")
         self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
@@ -519,18 +570,18 @@ class App(ctk.CTk):
         self._add_slider_card(parameters, 2, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch)
 
         status_row = ctk.CTkFrame(deck, fg_color="transparent")
-        status_row.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 3))
+        status_row.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 3))
         status_row.grid_columnconfigure(0, weight=1)
         self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=self._font(size=12, weight="bold"))
         self._status_label.grid(row=0, column=0, sticky="w")
         self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, font=self._font(size=11), fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
         self._btn_stop.grid(row=0, column=1, sticky="e")
         self._progress = ctk.CTkProgressBar(deck, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
-        self._progress.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 7))
+        self._progress.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 7))
         self._progress.set(0)
 
         actions = ctk.CTkFrame(deck, fg_color="transparent")
-        actions.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 9))
+        actions.grid(row=8, column=0, sticky="ew", padx=18, pady=(0, 9))
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
         self._btn_generate = ctk.CTkButton(actions, text=self._t("generate"), command=self._on_generate, height=36, font=self._font(size=14, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
@@ -539,6 +590,7 @@ class App(ctk.CTk):
         self._btn_play.grid(row=1, column=0, sticky="ew", padx=(0, 4))
         self._btn_save = ctk.CTkButton(actions, text=self._t("save"), command=self._on_save, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"))
         self._btn_save.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+        self._configure_highlight_tag()
         self._sync_generated_status()
         self._update_generated_buttons()
         self._update_voice_info()
@@ -586,7 +638,6 @@ class App(ctk.CTk):
     # ============================================================ 事件绑定
 
     def _bind_events(self):
-        self._voice_search.bind("<KeyRelease>", self._on_search_voice)
         self._textbox.bind("<KeyRelease>", self._on_text_edited)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -693,31 +744,57 @@ class App(ctk.CTk):
                 return f"{name} · {locale} · {gender}（{code}）"
             friendly = info.get("FriendlyName") or code
             return f"{friendly} ({code})"
-        for friendly, voice_code in CURATED_VOICES:
-            if voice_code == code:
-                return f"{friendly}（{code}）" if self._language == "zh" else f"{friendly} ({code})"
         return code
 
+    def _on_language_changed(self, value):
+        code = self._lang_map.get(value)
+        if not code or code == self._selected_lang:
+            return
+        self._selected_lang = code
+        self._refresh_voice_selectors()
+        self._invalidate_generated()
+
+    def _on_gender_changed(self, value):
+        key = self._gender_map.get(value)
+        if not key or key == self._selected_gender:
+            return
+        self._selected_gender = key
+        self._refresh_voice_selectors()
+        self._invalidate_generated()
+
     def _on_voice_changed(self, value):
-        for code in list(self._voice_map) + [code for _, code in CURATED_VOICES]:
+        for code in list(self._voice_map):
             if self._display_name(code) == value:
                 self._selected_voice_code = code
                 break
-        self._invalidate_generated()
+        else:
+            return
+        if self._groups_engine is not None:
+            actual = self._groups_engine.voice_gender(self._selected_voice_code)
+            genders = self._groups_engine.genders(self._selected_lang)
+            if actual in genders and actual != self._selected_gender:
+                self._selected_gender = actual
+                label = next((k for k, v in self._gender_map.items() if v == actual), "")
+                if label:
+                    self._gender_var.set(label)
         self._update_voice_info()
+        self._invalidate_generated()
 
-    def _restore_original_defaults(self):
+    def _restore_default_settings(self):
         self._selected_voice_code = DEFAULT_VOICE
+        self._selected_lang = "en"
+        self._selected_gender = "Male"
         self._rate_var.set(DEFAULT_RATE)
         self._volume_var.set(DEFAULT_VOLUME)
         self._pitch_var.set(DEFAULT_PITCH)
-        self._refresh_voice_combo()
+        self._refresh_voice_selectors(preferred=DEFAULT_VOICE)
         self._invalidate_generated()
+        self._update_voice_info()
         self.log(self._t("original"))
 
     def _selected_voice(self) -> str:
         value = self._voice_var.get()
-        for code in list(self._voice_map) + [code for _, code in CURATED_VOICES]:
+        for code in self._voice_map:
             if self._display_name(code) == value:
                 self._selected_voice_code = code
                 return code
@@ -733,36 +810,85 @@ class App(ctk.CTk):
         else:
             self._voice_info.configure(text="")
 
-    def _on_search_voice(self, _event=None):
-        self._search_text = self._voice_search.get().strip().lower()
-        self._refresh_voice_combo()
+    def _gender_label(self, key: str) -> str:
+        if key == GENDER_ALL:
+            return self._t("gender_all")
+        return {
+            GENDER_FEMALE: self._t("gender_female"),
+            GENDER_MALE: self._t("gender_male"),
+            GENDER_OTHER: self._t("gender_other"),
+        }.get(key, key)
 
-    def _refresh_voice_combo(self):
-        codes = []
-        if self._search_text:
-            for code, info in self._voice_map.items():
-                haystack = f"{info.get('FriendlyName', '')} {info.get('Locale', '')} {code}".lower()
-                if self._search_text in haystack:
-                    codes.append(code)
-        else:
-            codes = [c for _f, c in CURATED_VOICES if c not in codes]
-            codes += [c for c in self._voice_map if c not in codes]
-        names = [self._display_name(c) for c in codes[:300]]
+    def _localized_lang_name(self, code: str) -> str:
+        if self._language == "zh":
+            return f"{self.LANGUAGE_NAMES_ZH.get(code, code)}（{code}）"
+        return code.capitalize() if code.islower() else code
+
+    def _refresh_voice_selectors(self, preferred: Optional[str] = None):
+        """重建 语言 → 性别 → 音色 三级下拉（本地分组，无远端请求）。"""
+        engine = self._groups_engine
+        if engine is None:
+            self._refresh_voice_fallback()
+            return
+        langs = engine.languages()
+        if not langs:
+            self._refresh_voice_fallback()
+            return
+
+        def _lang_key(code: str):
+            order = {"zh": 0, "en": 1}
+            return (order.get(code, 2), self._localized_lang_name(code).lower())
+
+        ordered = sorted(langs, key=_lang_key)
+        self._lang_map = {self._localized_lang_name(c): c for c in ordered}
+        if self._selected_lang not in langs:
+            self._selected_lang = "en" if "en" in langs else langs[0]
+        self._lang_combo.configure(values=list(self._lang_map.keys()))
+        lang_label = next(k for k, v in self._lang_map.items() if v == self._selected_lang)
+        self._lang_var.set(lang_label)
+
+        genders = engine.genders(self._selected_lang)
+        gender_opts = [GENDER_ALL] + genders
+        self._gender_map = {self._gender_label(g): g for g in gender_opts}
+        if self._selected_gender not in gender_opts:
+            self._selected_gender = GENDER_ALL
+        self._gender_combo.configure(values=list(self._gender_map.keys()))
+        gender_label = next(k for k, v in self._gender_map.items() if v == self._selected_gender)
+        self._gender_var.set(gender_label)
+
+        voices = engine.voices(
+            self._selected_lang,
+            None if self._selected_gender == GENDER_ALL else self._selected_gender,
+        )
+        codes = [v.get("ShortName") for v in voices]
+        target = preferred or self._selected_voice_code
+        if target not in codes:
+            if self._selected_lang == "en" and DEFAULT_VOICE in codes:
+                target = DEFAULT_VOICE
+            else:
+                target = codes[0] if codes else self._selected_voice_code
+        self._selected_voice_code = target
+        names = [self._display_name(c) for c in codes]
         self._voice_combo.configure(values=names)
-        selected_name = self._display_name(self._selected_voice_code)
-        if names:
-            self._voice_var.set(selected_name if selected_name in names else names[0])
-            if selected_name not in names:
-                self._selected_voice_code = codes[0]
+        self._voice_var.set(self._display_name(target) if names else "")
         self._update_voice_info()
 
+    def _refresh_voice_fallback(self):
+        """语音列表尚未加载时，至少保留默认音色可选。"""
+        codes = [self._selected_voice_code] if self._selected_voice_code else []
+        names = [self._display_name(c) for c in codes]
+        self._voice_combo.configure(values=names)
+        if names:
+            self._voice_var.set(names[0])
+        self._update_voice_info()
     def _apply_voices(self, voices, err):
         if err:
             self.log(f"[语音] 加载语音列表失败：{err}")
-        else:
-            self._voice_map = {v["ShortName"]: v for v in voices}
-            self.log(f"[语音] 已加载 {len(self._voice_map)} 个可用语音")
-            self._refresh_voice_combo()
+            return
+        self._voice_map = {v["ShortName"]: v for v in voices}
+        self._groups_engine = VoiceGroupingEngine(voices)
+        self.log(f"[语音] 已加载 {len(self._voice_map)} 个可用语音（{len(self._groups_engine.languages())} 种语言）")
+        self._refresh_voice_selectors(preferred=DEFAULT_VOICE if self._selected_voice_code == DEFAULT_VOICE else None)
 
     # ============================================================ 文本
 
@@ -894,6 +1020,10 @@ class App(ctk.CTk):
             return
         self.log("[试听] 开始播放已生成的音频…")
         self._play_audio(self._generated_path)
+        if self._timeline_enabled and self._generated_timeline:
+            self._highlight_ranges = self._build_highlight_ranges()
+            self._highlight_running = True
+            self.after(150, self._tick_highlight)
 
     def _on_save(self):
         if not self._generated_path or not os.path.exists(self._generated_path):
@@ -951,6 +1081,169 @@ class App(ctk.CTk):
                 pygame.mixer.music.unload()
         except Exception:  # noqa: BLE001
             pass
+        self._clear_highlight()
+
+    def _toggle_timeline(self):
+        self._timeline_enabled = bool(self._timeline_var.get())
+        self._settings["timeline_json"] = self._timeline_enabled
+        self._save_settings()
+        if not self._timeline_enabled:
+            self._clear_highlight()
+        self.log(self._t("timeline_on") if self._timeline_enabled else self._t("timeline_off"))
+
+    def _configure_highlight_tag(self):
+        try:
+            self._textbox.tag_config(
+                "highlight_sentence",
+                background="#2A4A7F" if self._theme == "dark" else "#CFE0FF",
+                foreground="#F2F6FF" if self._theme == "dark" else "#17233A",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _build_highlight_ranges(self):
+        """把时间轴句子映射到文本框中的位置（尽力而为，找不到就跳过）。"""
+        ranges = []
+        if not self._generated_timeline:
+            return ranges
+        try:
+            for entry in self._generated_timeline.get("sentences", []):
+                text = entry.get("text", "")
+                if not text:
+                    continue
+                start = self._textbox.search(text, "1.0", stopindex="end")
+                if start:
+                    end = f"{start}+{len(text)}c"
+                    ranges.append((entry.get("index", 0), start, end))
+        except Exception:  # noqa: BLE001
+            pass
+        return ranges
+
+    def _tick_highlight(self):
+        if not self._highlight_running:
+            return
+        try:
+            if not (pygame.mixer.get_init() and pygame.mixer.music.get_busy()):
+                self._clear_highlight()
+                return
+            pos_ms = pygame.mixer.music.get_pos()
+            if pos_ms < 0:
+                self._clear_highlight()
+                return
+            seconds = pos_ms / 1000.0
+            idx = -1
+            for entry in self._generated_timeline.get("sentences", []):
+                if entry.get("start", 0) <= seconds < entry.get("end", 0):
+                    idx = entry.get("index", -1)
+                    break
+            self._textbox.tag_remove("highlight_sentence", "1.0", "end")
+            if idx >= 0:
+                for index, start, end in self._highlight_ranges:
+                    if index == idx:
+                        self._textbox.tag_add("highlight_sentence", start, end)
+                        self._textbox.see(start)
+                        break
+        except Exception:  # noqa: BLE001
+            pass
+        self.after(150, self._tick_highlight)
+
+    def _clear_highlight(self):
+        self._highlight_running = False
+        try:
+            self._textbox.tag_remove("highlight_sentence", "1.0", "end")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _show_timeline_help(self):
+        is_english = self._language == "en"
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("timeline_help_title"))
+        dialog.geometry("680x560")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(3, weight=1)
+
+        ctk.CTkLabel(
+            dialog, text=self._t("timeline_help_title"),
+            font=self._font(size=18, weight="bold"), text_color=self._c("text"),
+        ).grid(row=0, column=0, sticky="w", padx=24, pady=(20, 8))
+        ctk.CTkLabel(
+            dialog, text=self._t("timeline_help_desc"), wraplength=630, justify="left",
+            text_color=self._c("muted"),
+        ).grid(row=1, column=0, sticky="w", padx=24, pady=(0, 12))
+
+        # JSON 示例
+        ctk.CTkLabel(
+            dialog, text=self._t("timeline_help_json_title"),
+            font=self._font(size=13, weight="bold"), text_color=self._c("accent"),
+        ).grid(row=2, column=0, sticky="w", padx=24)
+        example_json = (
+            "{\n"
+            '  "version": 1,\n'
+            '  "kind": "sentence",\n'
+            '  "engine": "edge-tts",\n'
+            '  "voice": "en-US-AndrewMultilingualNeural",\n'
+            '  "rate": "+0%",\n'
+            '  "sentences": [\n'
+            '    { "index": 0, "start": 0.000, "end": 2.540, "word_count": 6, "text": "Hello world." },\n'
+            '    { "index": 1, "start": 2.540, "end": 5.120, "word_count": 5, "text": "This is a great tool." },\n'
+            '    { "index": 2, "start": 5.120, "end": 8.000, "word_count": 6, "text": "Hope you enjoy it." }\n'
+            "  ]\n"
+            "}"
+        )
+        json_box = ctk.CTkTextbox(dialog, height=190, corner_radius=12, fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=ctk.CTkFont(family="Consolas", size=13), wrap="none")
+        json_box.grid(row=3, column=0, sticky="nsew", padx=24, pady=(6, 12))
+        json_box.insert("1.0", example_json)
+        json_box.configure(state="disabled")
+
+        # 高亮演示
+        ctk.CTkLabel(
+            dialog, text=self._t("timeline_help_highlight_title"),
+            font=self._font(size=13, weight="bold"), text_color=self._c("accent"),
+        ).grid(row=4, column=0, sticky="w", padx=24)
+        demo_text = self._t("timeline_help_demo_text")
+        demo_box = ctk.CTkTextbox(dialog, height=96, corner_radius=12, fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=13), wrap="word")
+        demo_box.grid(row=5, column=0, sticky="ew", padx=24, pady=(6, 4))
+        demo_box.insert("1.0", demo_text)
+        demo_box.configure(state="disabled")
+        demo_bg = "#2A4A7F" if self._theme == "dark" else "#CFE0FF"
+        demo_fg = "#F2F6FF" if self._theme == "dark" else "#17233A"
+        demo_box.tag_config("demo_hl", background=demo_bg, foreground=demo_fg)
+
+        state = {"idx": -1}
+
+        def step_demo():
+            sentences = [s for s in demo_text.replace("\n", " ").split("。") if s.strip()]
+            if not sentences:
+                return
+            state["idx"] = (state["idx"] + 1) % len(sentences)
+            demo_box.tag_remove("demo_hl", "1.0", "end")
+            cursor = "1.0"
+            count = 0
+            for sent in sentences:
+                found = demo_box.search(sent, cursor, stopindex="end")
+                if not found:
+                    break
+                if count == state["idx"]:
+                    demo_box.tag_add("demo_hl", found, f"{found}+{len(sent)}c")
+                    break
+                cursor = f"{found}+{len(sent)}c"
+                count += 1
+            dialog.after(900, step_demo)
+
+        def stop_demo():
+            demo_box.tag_remove("demo_hl", "1.0", "end")
+
+        row = ctk.CTkFrame(dialog, fg_color="transparent")
+        row.grid(row=6, column=0, sticky="w", padx=24, pady=(2, 4))
+        ctk.CTkButton(row, text=self._t("timeline_help_demo_btn"), width=130, height=30, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF", command=step_demo).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(row, text="Stop" if is_english else "停止", width=80, height=30, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=stop_demo).pack(side="left")
+        ctk.CTkLabel(
+            dialog, text=self._t("timeline_help_note"), wraplength=630, justify="left",
+            text_color=self._c("muted"),
+        ).grid(row=7, column=0, sticky="w", padx=24, pady=(8, 18))
 
     # ============================================================ 对话框
 
@@ -985,6 +1278,8 @@ class App(ctk.CTk):
             (r"^\[试听\] 开始播放已生成的音频…$", r"[Play] Playing generated audio…"),
             (r"^\[试听\] 已停止播放。$", r"[Play] Playback stopped."),
             (r"^\[保存\] 音频已保存：(.*)$", r"[Save] Audio saved: \1"),
+            (r"^\[保存\] 时间轴 JSON 已保存：(.*)$", r"[Save] Timeline JSON saved: \1"),
+            (r"^\[警告\] 时间轴 JSON 保存失败：(.*)$", r"[Warning] Could not save timeline JSON: \1"),
             (r"^\[任务\] 失败：(.*)$", r"[Task] Failed: \1"),
             (r"^\[网络\] 不可达，检测到代理 (.*)，可能是网络不通或代理设置不正确。$", r"[Network] Unreachable; proxy detected: \1. Check the connection or proxy configuration."),
             (r"^\[网络\] 不可达（(.*)）。生成可能很慢或失败，建议检查网络后重试。$", r"[Network] Unreachable (\1). Synthesis may be slow or fail; check your network and retry."),
@@ -1112,8 +1407,19 @@ class App(ctk.CTk):
 
 
 def main():
-    app = App()
-    app.mainloop()
+    try:
+        app = App()
+        app.mainloop()
+    except Exception:
+        import traceback
+        try:
+            log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "EdgeTTSGui")
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, "crash.log"), "w", encoding="utf-8") as crash_file:
+                crash_file.write(traceback.format_exc())
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":
