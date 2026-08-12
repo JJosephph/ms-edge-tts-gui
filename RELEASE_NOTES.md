@@ -1,5 +1,11 @@
 # Release Notes
 
+## v1.1.2
+
+### Fixed
+
+- Voice-picker reliability: when the one-time voice list fetch failed or stalled (e.g. network hiccup), the Language / Gender dropdowns could stay empty with no way to recover. The app now retries the fetch up to 3 times, keeps the dropdowns populated with the default English-male **Andrew** selection as a visible fallback, shows a clear error inside the voice panel, and adds a **↻ reload** button to re-fetch the list anytime without restarting.
+
 ## v1.1.1
 
 ### New

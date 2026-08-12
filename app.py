@@ -15,6 +15,7 @@ import re
 import shutil
 import zipfile
 import tempfile
+import time
 import threading
 import webbrowser
 from datetime import datetime
@@ -46,7 +47,7 @@ from voice_groups import (
 )
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -120,6 +121,7 @@ class App(ctk.CTk):
 
         self._voice_map: dict = {}
         self._groups_engine: Optional[VoiceGroupingEngine] = None
+        self._voices_load_error: str | None = None
         self._language = "zh"
         self._selected_lang = "en"
         self._selected_gender = "Male"
@@ -185,6 +187,9 @@ class App(ctk.CTk):
         "timeline_off": {"zh": "已关闭：不再输出时间轴 JSON 与试听高亮", "en": "Off: no timeline JSON or playback highlight"},
 
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
+        "voices_load_error": {"zh": "语音列表加载失败，请检查网络后点 ↻ 重试", "en": "Could not load the voice list - check network and click ↻ to retry"},
+        "voices_reloading": {"zh": "正在重新加载语音列表…", "en": "Reloading voice list…"},
+        "voices_loaded": {"zh": "已加载语音（{count} 个，{langs} 种语言）", "en": "Voices loaded ({count} voices, {langs} languages)"},
         "original": {"zh": "原工作流默认：Andrew Multilingual · 语速 +0% · 音量 +0% · 音调 +0Hz", "en": "Original workflow: Andrew Multilingual · rate +0% · volume +0% · pitch +0Hz"},
         "restore": {"zh": "恢复初始设置", "en": "Restore defaults"},
         "reset_compact": {"zh": "恢复", "en": "Reset"},
@@ -550,7 +555,9 @@ class App(ctk.CTk):
         voice_details.grid_columnconfigure(0, weight=1)
         self._voice_info = ctk.CTkLabel(voice_details, text="", text_color=self._c("muted"), anchor="w", font=self._font(size=11))
         self._voice_info.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(voice_details, text=self._t("restore"), width=118, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._restore_default_settings).grid(row=0, column=1, padx=(8, 0))
+        self._btn_reload_voices = ctk.CTkButton(voice_details, text="↻", width=34, height=28, font=self._font(size=13, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), state="disabled", command=self._retry_load_voices)
+        self._btn_reload_voices.grid(row=0, column=1, padx=(8, 0))
+        ctk.CTkButton(voice_details, text=self._t("restore"), width=118, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._restore_default_settings).grid(row=0, column=2, padx=(8, 0))
 
         # 时间轴 JSON + 试听高亮（主界面常驻选项）
         timeline_row = ctk.CTkFrame(deck, fg_color="transparent")
@@ -650,12 +657,18 @@ class App(ctk.CTk):
         self.after(150, self._poll_ui)
 
     def _load_voices(self):
-        try:
-            proxy = detect_proxy()
-            voices = list_tts_voices(proxy=proxy)
-            self._ui_q.put(("voices", voices, ""))
-        except Exception as exc:  # noqa: BLE001
-            self._ui_q.put(("voices", [], str(exc)[:300]))
+        proxy = detect_proxy()
+        last_err = ""
+        for attempt in range(1, 4):
+            try:
+                voices = list_tts_voices(proxy=proxy)
+                self._ui_q.put(("voices", voices, ""))
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_err = str(exc)[:300]
+                if attempt < 3:
+                    time.sleep(3)
+        self._ui_q.put(("voices", [], last_err))
 
     def _probe_worker(self):
         result = probe_network()
@@ -825,6 +838,14 @@ class App(ctk.CTk):
             return f"{self.LANGUAGE_NAMES_ZH.get(code, code)}（{code}）"
         return code.capitalize() if code.islower() else code
 
+    def _retry_load_voices(self):
+        if self._btn_reload_voices:
+            self._btn_reload_voices.configure(state="disabled")
+        self._voices_load_error = None
+        self._voice_info.configure(text=self._t("voices_reloading"), text_color=self._c("muted"))
+        self.log("[语音] 正在重新加载语音列表…")
+        threading.Thread(target=self._load_voices, daemon=True).start()
+
     def _refresh_voice_selectors(self, preferred: Optional[str] = None):
         """重建 语言 → 性别 → 音色 三级下拉（本地分组，无远端请求）。"""
         engine = self._groups_engine
@@ -875,20 +896,39 @@ class App(ctk.CTk):
         self._update_voice_info()
 
     def _refresh_voice_fallback(self):
-        """语音列表尚未加载时，至少保留默认音色可选。"""
+        """语音列表尚未加载/加载失败时：语言、性别、音色至少保留默认项，避免下拉为空。"""
+        lang_name = self._localized_lang_name(self._selected_lang)
+        self._lang_map = {lang_name: self._selected_lang}
+        self._lang_combo.configure(values=[lang_name])
+        self._lang_var.set(lang_name)
+        gender_name = self._gender_label(self._selected_gender)
+        self._gender_map = {gender_name: self._selected_gender}
+        self._gender_combo.configure(values=[gender_name])
+        self._gender_var.set(gender_name)
         codes = [self._selected_voice_code] if self._selected_voice_code else []
         names = [self._display_name(c) for c in codes]
         self._voice_combo.configure(values=names)
         if names:
             self._voice_var.set(names[0])
-        self._update_voice_info()
+        if self._voices_load_error:
+            self._voice_info.configure(text=self._t("voices_load_error"), text_color="#f7768e")
+        else:
+            self._update_voice_info()
     def _apply_voices(self, voices, err):
+        self._voices_load_error = err
         if err:
             self.log(f"[语音] 加载语音列表失败：{err}")
+            self._refresh_voice_fallback()
+            if self._btn_reload_voices:
+                self._btn_reload_voices.configure(state="normal")
             return
         self._voice_map = {v["ShortName"]: v for v in voices}
         self._groups_engine = VoiceGroupingEngine(voices)
-        self.log(f"[语音] 已加载 {len(self._voice_map)} 个可用语音（{len(self._groups_engine.languages())} 种语言）")
+        count = len(self._voice_map)
+        langs = len(self._groups_engine.languages())
+        self.log(f"[语音] 已加载 {count} 个可用语音（{langs} 种语言）")
+        if self._btn_reload_voices:
+            self._btn_reload_voices.configure(state="disabled")
         self._refresh_voice_selectors(preferred=DEFAULT_VOICE if self._selected_voice_code == DEFAULT_VOICE else None)
 
     # ============================================================ 文本
