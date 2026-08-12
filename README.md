@@ -41,7 +41,7 @@
 
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
-- **时间轴 JSON + 试听高亮**：主界面勾选后，保存/下载时输出同名 `.timeline.json`（每句起止秒数）；试听时正在朗读的句子会在文章中实时高亮。
+- **时间轴 JSON + 试听高亮**：主界面勾选后，保存/下载时自动打包 ZIP（内含 MP3 与同名 `.timeline.json`，每句起止秒数）；试听时正在朗读的句子会在文章中实时高亮。
 - **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
 - **三级语音选择**：语音一次性从远端拉取后在本地按 **语言 → 性别 → 音色** 分组（内置分组引擎），不用再大海捞针；默认保留 `en-US-AndrewMultilingualNeural`（英语男声），可随时自选。
 - **音色自然丰富**：支持几百种语言、数百个音色，男声、女声都非常丰富；无论中文、粤语、英语还是其他外语，都是十分自然的 TTS 朗读，不是机器音——用过 Edge 朗读功能的人都懂。
@@ -53,6 +53,27 @@
 <p align="center">
   <img src="assets/ui-preview-zh.png" alt="中文界面预览" width="900">
 </p>
+
+### 亮点功能：时间轴 JSON + 试听逐句高亮
+
+这是本工具最值得一试的功能。在主界面勾选「时间轴 JSON + 试听高亮」后：
+
+- **保存即打包 ZIP**：点击「保存下载」时，自动生成一个 ZIP 压缩包，里面同时包含 MP3 和同名 `.timeline.json`——每句话的起止秒数清清楚楚，不用手动配对；
+- **试听实时高亮**：点击「试听」后，正在朗读的句子会在原文中逐句点亮，像 K 歌字幕一样跟着进度走，跟读复习特别方便；
+- **零额外成本**：时间轴来自生成时微软 TTS 返回的逐词时间，**不需要再次合成**，纯本地生成、完全免费、无需 API Key。
+
+`.timeline.json` 内容示例：
+
+```json
+{
+  "sentences": [
+    { "index": 0, "text": "你好，欢迎使用 Edge TTS 语音合成助手。", "start": 0.00, "end": 3.12 },
+    { "index": 1, "text": "时间轴来自微软 TTS 的逐词时间，无需二次合成。", "start": 3.12, "end": 6.80 }
+  ]
+}
+```
+
+> 适用场景：视频字幕、剪辑对齐、外语跟读、逐句复习、播客文稿等。
 
 ### 下载与使用
 
@@ -97,7 +118,7 @@ The project is designed as a general-purpose open-source tool. It includes pract
 | **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
 | **Multi-level voice picker** | Voices are fetched once and grouped locally into **Language → Gender → Voice** (built-in grouping engine) — no more scrolling a giant list. Male/female voices are rich across hundreds of languages; Chinese, Cantonese, English and more all sound natural, never robotic. |
 | **Original workflow compatibility** | Default settings mirror the existing RPA workflow: `en-US-AndrewMultilingualNeural`, rate `+0%`, volume `+0%`, pitch `+0Hz`. |
-| **Timeline JSON + highlight** | Optional one-click toggle on the main UI: saving/downloading also writes a `.timeline.json` with each sentence's start/end seconds, and during Play the sentence being read is highlighted live in the article. A " ? " help button shows a JSON example and a highlight demo. |
+| **Timeline JSON + highlight** | Optional one-click toggle on the main UI: saving bundles the MP3 and a `.timeline.json` (each sentence's start/end seconds) into one ZIP, and during Play the sentence being read is highlighted live in the article. A " ? " help button shows a JSON example and a highlight demo. |
 | **Restore defaults** | The voice-deck button resets voice to `en-US-AndrewMultilingualNeural` and rate/volume/pitch to `+0%`/`+0%`/`+0Hz` in one click. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
 | **Network protection** | Checks Edge TTS service availability and detects proxy environment variables before generation. |
@@ -105,6 +126,27 @@ The project is designed as a general-purpose open-source tool. It includes pract
 | **Bilingual interface** | Toggle the desktop UI between **中文** and **English** at any time. English articles and international voices are fully supported. |
 | **Day / night themes** | Switch between a bright reading-friendly theme and a focused dark workspace. |
 | **Preview cache control** | Choose a preview cache folder, open it, or clear it immediately. Only one temporary preview MP3 is reused and it is deleted when the app closes. |
+
+### ⭐ Key Feature: Timeline JSON + Live Sentence Highlight
+
+The feature we are most proud of — enable the **Timeline JSON + highlight** toggle on the main UI:
+
+- **Save = one ZIP**: clicking **Save Audio** produces a single ZIP that bundles the MP3 with its `.timeline.json` (start/end seconds for every sentence) — nothing to pair up by hand;
+- **Live highlight while playing**: the sentence being read lights up in the article in real time, sentence by sentence — great for shadowing, subtitles and review;
+- **Zero extra cost**: the timeline comes from the word-boundary data Microsoft TTS returns during generation — **no re-rendering** is ever needed. 100% local, free, no API key.
+
+Example `.timeline.json`:
+
+```json
+{
+  "sentences": [
+    { "index": 0, "text": "Hello, welcome to Edge TTS Voice Studio.", "start": 0.00, "end": 3.12 },
+    { "index": 1, "text": "The timeline is built from Microsoft TTS word boundaries, no re-render needed.", "start": 3.12, "end": 6.80 }
+  ]
+}
+```
+
+> Use cases: subtitles, video editing alignment, language shadowing, sentence-by-sentence review, podcast transcripts.
 
 ## Downloads
 
@@ -244,8 +286,8 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.1.1
+git push origin v1.1.1
 ```
 
 ## Privacy and Service Notice

@@ -1,10 +1,26 @@
 # Release Notes
 
+## v1.1.1
+
+### New
+
+- **ZIP bundle on save**: when the timeline option is on, Save now produces a single ZIP containing the MP3 and .timeline.json (each sentence's start/end seconds) — no more loose files. With the option off, saving stays a plain MP3 as before.
+
+### Improved
+
+- Play / Save buttons are now always visible and enabled; clicking them before generating shows a friendly "generate first" prompt, so they can no longer be mistaken for missing.
+- The voice deck is now scrollable and the default window is taller (1000x800, min 880x700), so the Generate / Play / Save buttons never get clipped on small or high-DPI screens.
+- README now promotes the timeline JSON + live sentence highlight as a key feature, with a JSON example in both Chinese and English.
+
+### Fixed
+
+- v1.1.0 regression: the bottom action buttons (Play / Save) could be cut off when the window was too short or DPI scaling was high — resolved with the scrollable deck and larger default window.
+
 ## v1.1.0
 
 ### New
 
-- **Multi-level voice picker**: voices are fetched from the server once and grouped locally into Language ? Gender ? Voice (a dedicated grouping engine). Language and gender filter drop-downs replace the long single voice list; the default stays **Andrew (en-US, male)**, and any voice is one short step away.
+- **Multi-level voice picker**: voices are fetched from the server once and grouped locally into Language → Gender → Voice (a dedicated grouping engine). Language and gender filter drop-downs replace the long single voice list; the default stays **Andrew (en-US, male)**, and any voice is one short step away.
 - **Timeline JSON + playback highlight**: the timeline option is now a first-class toggle on the main UI (not hidden in Settings) with a " ? " help button showing a sample `.timeline.json` and a live highlight demo. When enabled, saving/downloading an MP3 also writes a `.timeline.json` (sentence start/end seconds), and during Play the sentence being read is highlighted in the article in real time.
 - **Restore defaults button**: renamed to "恢复初始设置 / Restore defaults" and restyled to match the rest of the UI; it resets the voice to Andrew and rate/volume/pitch to +0%/+0%/+0Hz.
 - Fixed the Markdown/plain-text helper text that overflowed the composer panel; it now wraps cleanly.

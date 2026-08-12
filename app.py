@@ -13,6 +13,7 @@ import os
 import queue
 import re
 import shutil
+import zipfile
 import tempfile
 import threading
 import webbrowser
@@ -45,7 +46,7 @@ from voice_groups import (
 )
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -100,8 +101,8 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("980x720")
-        self.minsize(860, 640)
+        self.geometry("1000x800")
+        self.minsize(880, 700)
 
         self._ui_q: "queue.Queue" = queue.Queue()
         self._stall_req_q: "queue.Queue" = queue.Queue()
@@ -174,13 +175,13 @@ class App(ctk.CTk):
         "gender_other": {"zh": "其他", "en": "Other"},
         "timeline": {"zh": "时间轴 JSON + 试听高亮", "en": "Timeline JSON + highlight"},
         "timeline_help_title": {"zh": "时间轴 JSON 与试听高亮", "en": "Timeline JSON & Playback Highlight"},
-        "timeline_help_desc": {"zh": "开启后：① 保存/下载音频时，会同时输出同名 .timeline.json（每个句子的起止秒数）；② 试听播放时，正在朗读的句子会在文章中实时高亮。时间轴来自生成时微软 TTS 返回的逐词时间，无需再次合成。", "en": "When enabled: 1) saving/downloading audio also writes a .timeline.json with each sentence's start/end seconds; 2) during playback, the sentence being read is highlighted live. The timeline is built from Microsoft TTS word-boundary data captured at generation time - no re-rendering needed."},
+        "timeline_help_desc": {"zh": "开启后：① 保存/下载音频时，自动打包成 ZIP（内含 MP3 与同名 .timeline.json，记录每句起止秒数）；② 试听播放时，正在朗读的句子会在文章中实时高亮。时间轴来自生成时微软 TTS 返回的逐词时间，无需再次合成。", "en": "When enabled: 1) saving/downloading bundles the MP3 and a .timeline.json (each sentence's start/end seconds) into one ZIP; 2) during playback, the sentence being read is highlighted live. The timeline is built from Microsoft TTS word-boundary data captured at generation time - no re-rendering needed."},
         "timeline_help_json_title": {"zh": "示例 .timeline.json", "en": "Example .timeline.json"},
         "timeline_help_highlight_title": {"zh": "高亮演示（试听时实时跟随）", "en": "Highlight demo (follows live during playback)"},
         "timeline_help_demo_btn": {"zh": "▶ 演示高亮", "en": "▶ Demo highlight"},
         "timeline_help_demo_text": {"zh": "第一句：大家好，欢迎使用本工具。第二句：这一句正在被高亮显示。第三句：播放到哪一句，哪一句就会亮起来。", "en": "First sentence: welcome to this tool. Second sentence: this sentence is now highlighted. Third sentence: the sentence being spoken lights up."},
-        "timeline_help_note": {"zh": "提示：高亮在点击「试听」后开始，随播放进度逐句跳转；JSON 与音频一起保存在你选择的目录。", "en": "Tip: highlighting starts when you click Play and follows the progress; the JSON is saved next to the audio file."},
-        "timeline_on": {"zh": "已开启：保存时输出时间轴 JSON，试听时高亮当前句子", "en": "On: saves a timeline JSON with audio; highlights the sentence being read"},
+        "timeline_help_note": {"zh": "提示：高亮在点击「试听」后开始，随播放进度逐句跳转；保存时音频与时间轴 JSON 会打包成 ZIP 存到你选择的目录。", "en": "Tip: highlighting starts when you click Play and follows the progress; the audio and timeline JSON are saved together as a ZIP."},
+        "timeline_on": {"zh": "已开启：保存时打包 ZIP（音频 + 时间轴 JSON），试听时高亮当前句子", "en": "On: saves a ZIP bundle (audio + timeline JSON); highlights the sentence being read"},
         "timeline_off": {"zh": "已关闭：不再输出时间轴 JSON 与试听高亮", "en": "Off: no timeline JSON or playback highlight"},
 
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
@@ -490,7 +491,7 @@ class App(ctk.CTk):
         self._textbox.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 8))
         ctk.CTkLabel(composer, text=self._t("helper"), text_color=self._c("muted"), anchor="w", justify="left", wraplength=520, font=self._font(size=12)).grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 14))
 
-        deck = ctk.CTkFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
+        deck = ctk.CTkScrollableFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
         deck.grid(row=0, column=1, sticky="ns")
         deck.grid_columnconfigure(0, weight=1)
 
@@ -559,7 +560,7 @@ class App(ctk.CTk):
         ctk.CTkButton(timeline_row, text=" ? ", width=30, height=24, font=self._font(size=12, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._show_timeline_help).pack(side="left", padx=(6, 0))
 
         parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
-        parameters.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 7))
+        parameters.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 5))
         for column in range(3):
             parameters.grid_columnconfigure(column, weight=1, uniform="voice_control")
         self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
@@ -577,7 +578,7 @@ class App(ctk.CTk):
         self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, font=self._font(size=11), fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
         self._btn_stop.grid(row=0, column=1, sticky="e")
         self._progress = ctk.CTkProgressBar(deck, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
-        self._progress.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 7))
+        self._progress.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 5))
         self._progress.set(0)
 
         actions = ctk.CTkFrame(deck, fg_color="transparent")
@@ -1029,30 +1030,44 @@ class App(ctk.CTk):
         if not self._generated_path or not os.path.exists(self._generated_path):
             messagebox.showinfo(APP_NAME, self._t("no_audio"))
             return
+        bundle = bool(self._timeline_enabled and self._generated_timeline)
         default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        path = filedialog.asksaveasfilename(
-            title="保存音频",
-            defaultextension=".mp3",
-            filetypes=[("MP3 音频", "*.mp3")],
-            initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
-            initialfile=default_filename(),
-        )
+        if bundle:
+            path = filedialog.asksaveasfilename(
+                title=("Save ZIP (audio + timeline)" if self._language == "en" else "保存 ZIP 压缩包（音频 + 时间轴）"),
+                defaultextension=".zip",
+                filetypes=[("ZIP Archive (MP3 + timeline JSON)" if self._language == "en" else "ZIP 压缩包（MP3 + 时间轴 JSON）", "*.zip")],
+                initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
+                initialfile=default_filename().replace(".mp3", ".zip"),
+            )
+        else:
+            path = filedialog.asksaveasfilename(
+                title=("Save audio" if self._language == "en" else "保存音频"),
+                defaultextension=".mp3",
+                filetypes=[("MP3 audio" if self._language == "en" else "MP3 音频", "*.mp3")],
+                initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
+                initialfile=default_filename(),
+            )
         if not path:
             return
         try:
-            shutil.copy2(self._generated_path, path)
+            if bundle:
+                if not path.lower().endswith(".zip"):
+                    path += ".zip"
+                base_name = os.path.basename(os.path.splitext(path)[0])
+                with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+                    archive.write(self._generated_path, arcname=os.path.basename(self._generated_path))
+                    archive.writestr(
+                        base_name + ".timeline.json",
+                        json.dumps(self._generated_timeline, ensure_ascii=False, indent=2),
+                    )
+                self.log(f"[保存] 音频 + 时间轴已打包：{path}")
+            else:
+                shutil.copy2(self._generated_path, path)
+                self.log(f"[保存] 音频已保存：{path}")
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"保存失败：{exc}")
             return
-        self.log(f"[保存] 音频已保存：{path}")
-        if self._timeline_enabled and self._generated_timeline:
-            try:
-                timeline_path = os.path.splitext(path)[0] + ".timeline.json"
-                with open(timeline_path, "w", encoding="utf-8") as timeline_file:
-                    json.dump(self._generated_timeline, timeline_file, ensure_ascii=False, indent=2)
-                self.log(f"[保存] 时间轴 JSON 已保存：{timeline_path}")
-            except OSError as exc:
-                self.log(f"[警告] 时间轴 JSON 保存失败：{exc}")
 
         self._maybe_open_folder(path)
 
@@ -1378,8 +1393,8 @@ class App(ctk.CTk):
             self._progress.set(0)
 
     def _update_generated_buttons(self):
-        available = bool(self._generated_path) and os.path.exists(self._generated_path)
-        state = "normal" if available and not self._busy else "disabled"
+        # 试听/保存始终可见可用：尚未生成时点击会提示“请先生成”，避免按钮被误认为缺失
+        state = "disabled" if self._busy else "normal"
         self._btn_play.configure(state=state)
         self._btn_save.configure(state=state)
 
