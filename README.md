@@ -37,7 +37,7 @@
 
 ## 中文说明
 
-**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。界面可随时切换中文和 English，适合全世界用户。
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。它支持**时间轴 JSON + 试听逐句高亮**（保存时自动打包 ZIP），并提供**语言 → 性别 → 音色**三级语音选择，几百个音色不再大海捞针。界面可随时切换中文和 English，适合全世界用户。
 
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
@@ -61,6 +61,11 @@
 - **保存即打包 ZIP**：点击「保存下载」时，自动生成一个 ZIP 压缩包，里面同时包含 MP3 和同名 `.timeline.json`——每句话的起止秒数清清楚楚，不用手动配对；
 - **试听实时高亮**：点击「试听」后，正在朗读的句子会在原文中逐句点亮，像 K 歌字幕一样跟着进度走，跟读复习特别方便；
 - **零额外成本**：时间轴来自生成时微软 TTS 返回的逐词时间，**不需要再次合成**，纯本地生成、完全免费、无需 API Key。
+
+<p align="center">
+  <img src="assets/ui-timeline-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="540">
+  <img src="assets/ui-timeline-highlight.png" alt="试听逐句高亮演示" width="540">
+</p>
 
 `.timeline.json` 内容示例：
 
@@ -89,7 +94,7 @@
 
 **Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **WangYufan**.
 
-The project is designed as a general-purpose open-source tool. It includes practical safeguards for real-world network conditions, including service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt.
+The project is designed as a general-purpose open-source tool. It features a **Timeline JSON + live sentence highlight** mode (Save bundles the MP3 and timeline into one ZIP) and a **Language → Gender → Voice** cascading voice picker across hundreds of voices. It also includes practical safeguards for real-world network conditions: service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt.
 
 ## Interface Preview
 
@@ -134,6 +139,11 @@ The feature we are most proud of — enable the **Timeline JSON + highlight** to
 - **Save = one ZIP**: clicking **Save Audio** produces a single ZIP that bundles the MP3 with its `.timeline.json` (start/end seconds for every sentence) — nothing to pair up by hand;
 - **Live highlight while playing**: the sentence being read lights up in the article in real time, sentence by sentence — great for shadowing, subtitles and review;
 - **Zero extra cost**: the timeline comes from the word-boundary data Microsoft TTS returns during generation — **no re-rendering** is ever needed. 100% local, free, no API key.
+
+<p align="center">
+  <img src="assets/ui-timeline-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="540">
+  <img src="assets/ui-timeline-highlight.png" alt="Live sentence highlight demo" width="540">
+</p>
 
 Example `.timeline.json`:
 
