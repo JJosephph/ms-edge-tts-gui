@@ -25,11 +25,11 @@ if not exist ".venv\Scripts\python.exe" (
 ".venv\Scripts\python.exe" -m pip install -r requirements-dev.txt
 
  echo Building application directory...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "EdgeTTSGui" --icon "assets\app.ico" app.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "EdgeTTSGui" --icon "assets\app.ico" --hidden-import docx --hidden-import pypdf app.py
 if not exist "dist\EdgeTTSGui\EdgeTTSGui.exe" exit /b 1
 
  echo Building portable executable...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name "EdgeTTSGui-Portable" --icon "assets\app.ico" app.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name "EdgeTTSGui-Portable" --icon "assets\app.ico" --hidden-import docx --hidden-import pypdf app.py
 if not exist "dist\EdgeTTSGui-Portable.exe" exit /b 1
 
  echo Building installer...

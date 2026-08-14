@@ -34,10 +34,10 @@ jobs:
           sed -i "s/APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" app.py
 
       - name: PyInstaller 打包（目录版，供安装器使用）
-        run: pyinstaller --noconfirm --clean --onedir --windowed --name EdgeTTSGui --icon assets/app.ico app.py
+        run: pyinstaller --noconfirm --clean --onedir --windowed --name EdgeTTSGui --icon assets/app.ico --hidden-import docx --hidden-import pypdf app.py
 
       - name: PyInstaller 打包（便携单文件版）
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name EdgeTTSGui-Portable --icon assets/app.ico app.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name EdgeTTSGui-Portable --icon assets/app.ico --hidden-import docx --hidden-import pypdf app.py
 
       - name: 安装 Inno Setup
         run: choco install innosetup -y --no-progress

@@ -45,9 +45,10 @@ from voice_groups import (
     GENDER_OTHER,
     VoiceGroupingEngine,
 )
+from page_import import Page, import_file, split_text_into_pages
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.2.0"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -135,6 +136,18 @@ class App(ctk.CTk):
         self._timeline_var = None
         self._highlight_running = False
         self._highlight_ranges: list = []
+        self._pages: list = []
+        self._page_index = 0
+        self._generated_pages: dict = {}
+        self._batch_dir: str | None = None
+        self._note_var = None
+        self._note_entry = None
+        self._page_bar = None
+        self._page_label = None
+        self._btn_prev_page = None
+        self._btn_next_page = None
+        self._btn_import = None
+        self._btn_dub_pages = None
 
         self._build_ui()
         self._bind_events()
@@ -167,7 +180,7 @@ class App(ctk.CTk):
         "network_bad": {"zh": "●  网络异常", "en": "●  Network unavailable"},
         "article": {"zh": "文章内容", "en": "Article"},
         "count": {"zh": "字数：{count}", "en": "Characters: {count}"},
-        "helper": {"zh": "支持 Markdown / 纯文本；一次生成全文音频，之后可随时试听或保存下载。", "en": "Markdown & plain text supported; synthesize once, then play or save anytime."},
+        "helper": {"zh": "支持 Markdown / 纯文本；可导入 txt / md / docx / pdf 逐页旁白配音，一次生成，随时试听或保存下载。", "en": "Markdown & plain text supported; import txt / md / docx / pdf for page-by-page narration - synthesize once, then play or save anytime."},
         "voice": {"zh": "语音", "en": "Voice"},
         "lang": {"zh": "语言", "en": "Language"},
         "gender": {"zh": "性别", "en": "Gender"},
@@ -210,6 +223,16 @@ class App(ctk.CTk):
         "footer": {"zh": "免费开源软件 · MIT License · Powered by Microsoft Edge TTS", "en": "Free open-source software · MIT License · Powered by Microsoft Edge TTS"},
         "repository": {"zh": "仓库：", "en": "Repo: "},
         "empty": {"zh": "请输入文章内容。", "en": "Please enter some article text."},
+        "import_file": {"zh": "导入文件", "en": "Import File"},
+        "page_dub": {"zh": "逐页配音", "en": "Dub All Pages"},
+        "page_label": {"zh": "第 {current}/{total} 页", "en": "Page {current}/{total}"},
+        "page_note": {"zh": "备注", "en": "Note"},
+        "page_note_hint": {"zh": "备注不朗读，随 pages.json 一并导出", "en": "Note is not spoken; exported with pages.json"},
+        "prev_page": {"zh": "‹ 上一页", "en": "‹ Prev"},
+        "next_page": {"zh": "下一页 ›", "en": "Next ›"},
+        "no_pages": {"zh": "请先点击“导入文件”导入文档进行分页。", "en": "Please import a file first to create pages."},
+        "pages_zip_title": {"zh": "保存分页配音压缩包（音频 + pages.json + 备注）", "en": "Save page dubbing bundle (audio + pages.json + notes)"},
+        "pages_zip_filetype": {"zh": "ZIP 压缩包（每页 MP3 + pages.json）", "en": "ZIP bundle (per-page MP3 + pages.json)"},
     }
 
     def _t(self, key, **kwargs):
@@ -413,6 +436,19 @@ class App(ctk.CTk):
             self._textbox.insert("1.0", text)
         self._refresh_voice_selectors()
         self._on_text_changed()
+        if self._pages:
+            self._page_index = max(0, min(self._page_index, len(self._pages) - 1))
+            page = self._pages[self._page_index]
+            self._textbox.delete("1.0", "end")
+            if page.text:
+                self._textbox.insert("1.0", page.text)
+            if self._note_var is not None:
+                self._note_var.set(page.note)
+            self._update_page_bar()
+            self._on_text_changed()
+            self._sync_generated_status()
+        else:
+            self._update_page_bar()
         self.after(150, self._poll_ui)
 
     def _switch_theme(self):
@@ -485,16 +521,41 @@ class App(ctk.CTk):
         composer = ctk.CTkFrame(workspace, corner_radius=20, fg_color=self._c("surface"), border_width=1, border_color=self._c("border"))
         composer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         composer.grid_columnconfigure(0, weight=1)
-        composer.grid_rowconfigure(2, weight=1)
+        composer.grid_rowconfigure(3, weight=1)
         ctk.CTkLabel(composer, text=self._t("composer"), text_color=self._c("accent"), font=self._font(size=11, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(16, 0))
         title_row = ctk.CTkFrame(composer, fg_color="transparent")
         title_row.grid(row=1, column=0, sticky="ew", padx=18, pady=(2, 6))
         ctk.CTkLabel(title_row, text=self._t("article"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).pack(side="left")
+        self._btn_import = ctk.CTkButton(title_row, text=self._t("import_file"), width=92, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_import_file)
+        self._btn_import.pack(side="right", padx=(6, 0))
+        self._btn_dub_pages = ctk.CTkButton(title_row, text=self._t("page_dub"), width=96, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF", command=self._on_dub_pages, state="disabled")
+        self._btn_dub_pages.pack(side="right", padx=(6, 0))
         self._char_count = ctk.CTkLabel(title_row, text=self._t("count", count=0), text_color=self._c("muted"), font=self._font(size=12))
         self._char_count.pack(side="right")
+
+        # 分页工具栏（导入文件后显示）
+        self._page_bar = ctk.CTkFrame(composer, fg_color="transparent")
+        self._page_bar.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 6))
+        self._page_bar.grid_columnconfigure(4, weight=1)
+        self._btn_prev_page = ctk.CTkButton(self._page_bar, text=self._t("prev_page"), width=84, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), command=self._on_prev_page, state="disabled")
+        self._btn_prev_page.grid(row=0, column=0, padx=(0, 6))
+        self._page_label = ctk.CTkLabel(self._page_bar, text=self._t("page_label", current=1, total=1), text_color=self._c("accent"), font=self._font(size=13, weight="bold"))
+        self._page_label.grid(row=0, column=1, padx=(0, 6))
+        self._btn_next_page = ctk.CTkButton(self._page_bar, text=self._t("next_page"), width=84, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), command=self._on_next_page, state="disabled")
+        self._btn_next_page.grid(row=0, column=2, padx=(0, 12))
+        ctk.CTkLabel(self._page_bar, text=self._t("page_note"), text_color=self._c("muted"), font=self._font(size=12)).grid(row=0, column=3, sticky="w")
+        note_cell = ctk.CTkFrame(self._page_bar, fg_color="transparent")
+        note_cell.grid(row=0, column=4, sticky="ew")
+        note_cell.grid_columnconfigure(0, weight=1)
+        self._note_var = tk.StringVar(value="")
+        self._note_entry = ctk.CTkEntry(note_cell, textvariable=self._note_var, height=28, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
+        self._note_entry.grid(row=0, column=0, sticky="ew")
+        self._note_entry.bind("<KeyRelease>", self._on_note_edited)
+        self._page_bar.grid_remove()
+
         self._textbox = ctk.CTkTextbox(composer, wrap="word", corner_radius=14, fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=14))
-        self._textbox.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 8))
-        ctk.CTkLabel(composer, text=self._t("helper"), text_color=self._c("muted"), anchor="w", justify="left", wraplength=520, font=self._font(size=12)).grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 14))
+        self._textbox.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 8))
+        ctk.CTkLabel(composer, text=self._t("helper"), text_color=self._c("muted"), anchor="w", justify="left", wraplength=520, font=self._font(size=12)).grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 14))
 
         deck = ctk.CTkScrollableFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
         deck.grid(row=0, column=1, sticky="ns")
@@ -602,6 +663,7 @@ class App(ctk.CTk):
         self._sync_generated_status()
         self._update_generated_buttons()
         self._update_voice_info()
+        self._update_page_bar()
 
     def _add_slider_card(self, master, column, label, variable, minimum, maximum, formatter):
         card = ctk.CTkFrame(master, fg_color="transparent")
@@ -708,16 +770,28 @@ class App(ctk.CTk):
             self.log(item[1])
         elif kind == "progress":
             percent, written = item[1], item[2]
-            label = (
-                f"Synthesizing… {percent}% · {written / 1024:.0f} KB"
-                if self._language == "en"
-                else f"正在合成… {percent}% · 已接收 {written / 1024:.0f} KB"
-            )
+            current_page, total_pages = None, None
+            if len(item) > 4:
+                current_page, total_pages = item[3], item[4]
+            if current_page is not None:
+                label = (
+                    f"Dubbing page {current_page}/{total_pages}… {percent:.0f}% · {written / 1024:.0f} KB"
+                    if self._language == "en"
+                    else f"逐页配音 第 {current_page}/{total_pages} 页… {percent:.0f}% · 已接收 {written / 1024:.0f} KB"
+                )
+            else:
+                label = (
+                    f"Synthesizing… {percent}% · {written / 1024:.0f} KB"
+                    if self._language == "en"
+                    else f"正在合成… {percent}% · 已接收 {written / 1024:.0f} KB"
+                )
             self._progress.configure(mode="determinate")
             self._progress.set(percent / 100)
             self._status_label.configure(text=label)
         elif kind == "task_done":
             self._on_task_done(item[1], item[2])
+        elif kind == "batch_done":
+            self._on_batch_done(item[1])
 
     # ============================================================ 网络
 
@@ -939,6 +1013,12 @@ class App(ctk.CTk):
 
     def _on_text_edited(self, _event=None):
         self._on_text_changed()
+        if self._pages:
+            self._sync_page_from_ui()
+            page = self._pages[self._page_index]
+            entry = self._generated_pages.get(page.index)
+            if entry and normalize_for_tts(clean_text(entry["text"])) != self._get_cleaned_text():
+                del self._generated_pages[page.index]
         if self._generated_text is not None:
             current = self._get_cleaned_text()
             if current != self._generated_text:
@@ -1020,6 +1100,17 @@ class App(ctk.CTk):
             self._generated_path = path
             self._generated_text = generated_text
             self._generated_timeline = result.get("timeline")
+            if self._pages:
+                page = self._pages[self._page_index]
+                self._generated_pages[page.index] = {
+                    "index": page.index,
+                    "page": self._page_index + 1,
+                    "title": page.title,
+                    "text": generated_text,
+                    "note": page.note,
+                    "audio": path,
+                    "timeline": result.get("timeline"),
+                }
             size_kb = os.path.getsize(path) / 1024 if os.path.exists(path) else 0
             self._progress.set(1.0)
             self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
@@ -1048,11 +1139,260 @@ class App(ctk.CTk):
             messagebox.showwarning(APP_NAME, "请输入文章内容。")
             return
         self._stop_playback()
-        self.log(f"[生成] 开始合成全文音频（{len(cleaned)} 字）")
-        self._start_task(cleaned, self._preview_path, "generate")
+        if self._pages:
+            self._sync_page_from_ui()
+            self.log(f"[生成] 开始合成第 {self._page_index + 1} 页音频（{len(cleaned)} 字）")
+            self._start_task(cleaned, self._output_path_for_current(), "generate")
+        else:
+            self.log(f"[生成] 开始合成全文音频（{len(cleaned)} 字）")
+            self._start_task(cleaned, self._preview_path, "generate")
+
+    # ============================================================ 分页导入 / 逐页配音
+
+    def _on_import_file(self):
+        if self._busy:
+            return
+        is_english = self._language == "en"
+        path = filedialog.askopenfilename(
+            title=("Import document for page-by-page narration" if is_english else "导入文档，逐页旁白配音"),
+            filetypes=[
+                ("Documents (txt / md / docx / pdf)" if is_english else "文档（txt / md / docx / pdf）", "*.txt *.md *.markdown *.docx *.pdf"),
+                ("All files" if is_english else "所有文件", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            pages = import_file(path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(APP_NAME, ("Import failed:\n\n" if is_english else "导入失败：\n\n") + str(exc))
+            self.log(f"[导入] 导入失败：{exc}")
+            return
+        self._sync_page_from_ui()
+        self._cleanup_batch()
+        self._pages = pages
+        self._page_index = 0
+        self._generated_pages = {}
+        self._load_page_into_ui(0)
+        self.log(f"[导入] 已导入 {len(pages)} 页：{os.path.basename(path)}")
+
+    def _load_page_into_ui(self, index):
+        if not self._pages:
+            self._page_index = 0
+            return
+        index = max(0, min(index, len(self._pages) - 1))
+        self._page_index = index
+        page = self._pages[index]
+        self._textbox.delete("1.0", "end")
+        if page.text:
+            self._textbox.insert("1.0", page.text)
+        if self._note_var is not None:
+            self._note_var.set(page.note)
+        self._update_page_bar()
+        self._on_text_changed()
+        self._invalidate_generated()
+
+    def _on_prev_page(self):
+        if self._pages and self._page_index > 0:
+            self._sync_page_from_ui()
+            self._load_page_into_ui(self._page_index - 1)
+
+    def _on_next_page(self):
+        if self._pages and self._page_index < len(self._pages) - 1:
+            self._sync_page_from_ui()
+            self._load_page_into_ui(self._page_index + 1)
+
+    def _on_note_edited(self, _event=None):
+        self._sync_page_from_ui()
+
+    def _sync_page_from_ui(self):
+        if not self._pages or self._page_index >= len(self._pages):
+            return
+        page = self._pages[self._page_index]
+        try:
+            page.text = self._textbox.get("1.0", "end-1c")
+        except Exception:  # noqa: BLE001
+            pass
+        if self._note_var is not None:
+            page.note = self._note_var.get()
+
+    def _update_page_bar(self):
+        has_pages = bool(self._pages)
+        if self._page_bar is None:
+            return
+        if not has_pages:
+            self._page_bar.grid_remove()
+            if self._btn_dub_pages is not None:
+                self._btn_dub_pages.configure(state="disabled")
+            return
+        self._page_bar.grid()
+        total = len(self._pages)
+        self._page_label.configure(text=self._t("page_label", current=self._page_index + 1, total=total))
+        idle = not self._busy
+        self._btn_prev_page.configure(state="normal" if idle and self._page_index > 0 else "disabled")
+        self._btn_next_page.configure(state="normal" if idle and self._page_index < total - 1 else "disabled")
+        if self._btn_dub_pages is not None:
+            self._btn_dub_pages.configure(state="normal" if idle else "disabled")
+        self._note_entry.configure(state="normal" if idle else "disabled")
+
+    def _output_path_for_current(self):
+        if self._pages:
+            return os.path.join(tempfile.gettempdir(), f"edge_tts_page_{self._page_index + 1:03d}.mp3")
+        return self._preview_path
+
+    def _current_page_generated(self):
+        if not self._pages or self._page_index >= len(self._pages):
+            return None
+        entry = self._generated_pages.get(self._pages[self._page_index].index)
+        if entry and os.path.exists(entry.get("audio", "")):
+            return entry
+        return None
+
+    def _cleanup_batch(self):
+        if self._batch_dir and os.path.isdir(self._batch_dir):
+            try:
+                shutil.rmtree(self._batch_dir, ignore_errors=True)
+            except OSError:
+                pass
+        self._batch_dir = None
+
+    def _on_dub_pages(self):
+        if self._busy:
+            return
+        if not self._pages:
+            messagebox.showinfo(APP_NAME, self._t("no_pages"))
+            return
+        self._sync_page_from_ui()
+        self._stop_playback()
+        self._cleanup_batch()
+        self._batch_dir = tempfile.mkdtemp(prefix="edgetts_pages_")
+        self._busy = True
+        self._cancel_event = threading.Event()
+        self._set_busy_ui(True)
+        self._progress.configure(mode="determinate")
+        self._progress.set(0)
+        self._status_label.configure(text=("Dubbing pages…" if self._language == "en" else "正在逐页配音…"), text_color="#e0af68")
+        self.log(f"[分页] 开始逐页配音（共 {len(self._pages)} 页）")
+        threading.Thread(target=self._worker_batch_pages, daemon=True).start()
+
+    def _worker_batch_pages(self):
+        total = len(self._pages)
+        cfg = self._build_cfg()
+        results = []
+        canceled = False
+        for pos, page in enumerate(self._pages, start=1):
+            if self._cancel_event.is_set():
+                canceled = True
+                break
+            text = normalize_for_tts(clean_text(page.text))
+            if not text.strip():
+                self._ui_q.put(("log", f"[分页] 第 {pos}/{total} 页无可用文字，已跳过。"))
+                continue
+            output_path = os.path.join(self._batch_dir, f"page_{pos:03d}.mp3")
+            controller = self._make_controller()
+            engine = TTSEngine(
+                on_log=lambda message: self._ui_q.put(("log", message)),
+                on_progress=lambda percent, written, pos=pos, total=total: self._ui_q.put(
+                    ("progress", (pos - 1 + percent / 100.0) / total * 100, written, pos, total)
+                ),
+                controller=controller,
+                cancel_event=self._cancel_event,
+            )
+            result = engine.generate(text, output_path, cfg)
+            if self._cancel_event.is_set():
+                canceled = True
+                break
+            if result.get("status") == "done":
+                size_kb = os.path.getsize(output_path) / 1024 if os.path.exists(output_path) else 0
+                self._ui_q.put(("log", f"[分页] 第 {pos}/{total} 页完成（{size_kb:.0f} KB）。"))
+                results.append({
+                    "index": page.index,
+                    "page": pos,
+                    "title": page.title,
+                    "text": text,
+                    "note": page.note,
+                    "audio": output_path,
+                    "timeline": getattr(engine, "timeline", None),
+                })
+            else:
+                error = result.get("error", "未知错误")
+                self._ui_q.put(("log", f"[分页] 第 {pos}/{total} 页生成失败：{error}"))
+        self._ui_q.put(("batch_done", {"results": results, "canceled": canceled}))
+
+    def _on_batch_done(self, payload):
+        self._busy = False
+        self._set_busy_ui(False)
+        results = payload.get("results") or []
+        canceled = bool(payload.get("canceled"))
+        self._generated_pages = {entry["index"]: entry for entry in results}
+        self._sync_generated_status()
+        if canceled:
+            self._progress.set(1.0 if results else 0)
+            self._status_label.configure(text=self._t("stopped"), text_color="#e0af68")
+            self.log(f"[分页] 已停止（完成 {len(results)} 页）。")
+        elif not results:
+            self._progress.set(0)
+            self._status_label.configure(text=self._t("failed"), text_color="#f7768e")
+            self.log("[分页] 未生成任何页面音频。")
+        else:
+            self.log(f"[分页] 逐页配音完成：{len(results)} 页，可试听或保存下载。")
+        self._update_generated_buttons()
+        self._update_page_bar()
+
+    def _save_pages_bundle(self):
+        entries = sorted(self._generated_pages.values(), key=lambda e: e.get("page", e.get("index", 0)))
+        default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        path = filedialog.asksaveasfilename(
+            title=self._t("pages_zip_title"),
+            defaultextension=".zip",
+            filetypes=[(self._t("pages_zip_filetype"), "*.zip")],
+            initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
+            initialfile=default_filename().replace(".mp3", "_pages.zip"),
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
+        try:
+            cfg = self._build_cfg()
+            payload = {
+                "version": 1,
+                "kind": "pages",
+                "engine": "edge-tts",
+                "voice": cfg.voice,
+                "rate": cfg.rate,
+                "volume": cfg.volume,
+                "pitch": cfg.pitch,
+                "count": len(entries),
+                "pages": [],
+            }
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for entry in entries:
+                    arcname = f"page_{entry['page']:03d}.mp3"
+                    audio = entry.get("audio")
+                    has_audio = bool(audio and os.path.exists(audio))
+                    if has_audio:
+                        archive.write(audio, arcname=arcname)
+                    payload["pages"].append({
+                        "index": entry.get("index"),
+                        "page": entry.get("page"),
+                        "title": entry.get("title", ""),
+                        "text": entry.get("text", ""),
+                        "note": entry.get("note", ""),
+                        "audio": arcname if has_audio else None,
+                        "timeline": entry.get("timeline"),
+                    })
+                archive.writestr("pages.json", json.dumps(payload, ensure_ascii=False, indent=2))
+            self.log(f"[保存] 分页配音压缩包已保存：{path}")
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"保存失败：{exc}")
+            return
+        self._maybe_open_folder(path)
 
     def _on_play(self):
-        if not self._generated_path or not os.path.exists(self._generated_path):
+        page_entry = self._current_page_generated()
+        target = page_entry["audio"] if page_entry else self._generated_path
+        if not target or not os.path.exists(target):
             messagebox.showinfo(APP_NAME, self._t("no_audio"))
             return
         if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
@@ -1060,13 +1400,19 @@ class App(ctk.CTk):
             self.log("[试听] 已停止播放。")
             return
         self.log("[试听] 开始播放已生成的音频…")
-        self._play_audio(self._generated_path)
-        if self._timeline_enabled and self._generated_timeline:
-            self._highlight_ranges = self._build_highlight_ranges()
-            self._highlight_running = True
-            self.after(150, self._tick_highlight)
+        self._play_audio(target)
+        if self._timeline_enabled:
+            timeline = page_entry.get("timeline") if page_entry else self._generated_timeline
+            if timeline:
+                self._generated_timeline = timeline
+                self._highlight_ranges = self._build_highlight_ranges()
+                self._highlight_running = True
+                self.after(150, self._tick_highlight)
 
     def _on_save(self):
+        if self._generated_pages:
+            self._save_pages_bundle()
+            return
         if not self._generated_path or not os.path.exists(self._generated_path):
             messagebox.showinfo(APP_NAME, self._t("no_audio"))
             return
@@ -1328,6 +1674,17 @@ class App(ctk.CTk):
             (r"^\[语音\] 已加载 (\d+) 个可用语音$", r"[Voice] Loaded \1 available voices"),
             (r"^\[语音\] 加载语音列表失败：(.*)$", r"[Voice] Could not load voice list: \1"),
             (r"^\[生成\] 开始合成全文音频（(\d+) 字）$", r"[Generate] Synthesizing full audio (\1 characters)"),
+            (r"^\[生成\] 开始合成第 (\d+) 页音频（(\d+) 字）$", r"[Generate] Synthesizing page \1 audio (\2 characters)"),
+            (r"^\[导入\] 已导入 (\d+) 页：(.+)$", r"[Import] Imported \1 page(s): \2"),
+            (r"^\[导入\] 导入失败：(.*)$", r"[Import] Import failed: \1"),
+            (r"^\[分页\] 开始逐页配音（共 (\d+) 页）$", r"[Pages] Starting page-by-page dubbing (\1 pages)"),
+            (r"^\[分页\] 第 (\d+)/(\d+) 页完成（(.+) KB）。$", r"[Pages] Page \1/\2 done (\3 KB)."),
+            (r"^\[分页\] 第 (\d+)/(\d+) 页无可用文字，已跳过。$", r"[Pages] Page \1/\2 has no readable text; skipped."),
+            (r"^\[分页\] 第 (\d+)/(\d+) 页生成失败：(.*)$", r"[Pages] Page \1/\2 failed: \3"),
+            (r"^\[分页\] 逐页配音完成：(\d+) 页，可试听或保存下载。$", r"[Pages] Dubbing complete: \1 pages. Play or save anytime."),
+            (r"^\[分页\] 已停止（完成 (\d+) 页）。$", r"[Pages] Stopped (\1 page(s) done)."),
+            (r"^\[分页\] 未生成任何页面音频。$", r"[Pages] No page audio was generated."),
+            (r"^\[保存\] 分页配音压缩包已保存：(.*)$", r"[Save] Page bundle saved: \1"),
             (r"^\[生成\] 音频已生成：(.*)$", r"[Generate] Audio ready: \1"),
             (r"^\[生成\] 生成期间文本已修改，请重新生成。$", r"[Generate] Text changed during generation. Please generate again."),
             (r"^\[试听\] 开始播放已生成的音频…$", r"[Play] Playing generated audio…"),
@@ -1425,7 +1782,10 @@ class App(ctk.CTk):
         self._log.configure(state="disabled")
 
     def _sync_generated_status(self):
-        if self._generated_path and os.path.exists(self._generated_path):
+        if self._current_page_generated() is not None:
+            self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
+            self._progress.set(1.0)
+        elif self._generated_path and os.path.exists(self._generated_path):
             self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
             self._progress.set(1.0)
         else:
@@ -1448,11 +1808,15 @@ class App(ctk.CTk):
     def _set_busy_ui(self, busy: bool):
         self._btn_generate.configure(state="disabled" if busy else "normal")
         self._btn_stop.configure(state="normal" if busy else "disabled")
+        if self._btn_import is not None:
+            self._btn_import.configure(state="disabled" if busy else "normal")
+        self._update_page_bar()
         self._update_generated_buttons()
 
     def _on_close(self):
         self._cancel_event.set()
         self._stop_playback()
+        self._cleanup_batch()
         try:
             if os.path.exists(self._preview_path):
                 os.unlink(self._preview_path)

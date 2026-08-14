@@ -37,7 +37,7 @@
 
 ## 中文说明
 
-**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。它支持**时间轴 JSON + 试听逐句高亮**（保存时自动打包 ZIP），并提供**语言 → 性别 → 音色**三级语音选择，几百个音色不再大海捞针。界面可随时切换中文和 English，适合全世界用户。
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。它支持**导入文件 · 逐页旁白配音**（工作助手模式）与**时间轴 JSON + 试听逐句高亮**（保存时自动打包 ZIP），并提供**语言 → 性别 → 音色**三级语音选择，几百个音色不再大海捞针。界面可随时切换中文和 English，适合全世界用户。
 
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
@@ -47,6 +47,7 @@
 - **音色自然丰富**：支持几百种语言、数百个音色，男声、女声都非常丰富；无论中文、粤语、英语还是其他外语，都是十分自然的 TTS 朗读，不是机器音——用过 Edge 朗读功能的人都懂。
 - **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；「恢复初始设置」可一键还原。
 - **不占空间**：生成的音频只保存在一个临时 MP3 里，可自定义目录、打开或清理，关闭软件时自动删除。
+- **导入文件 · 逐页旁白配音**：直接导入 `txt / md / docx / pdf`，自动拆分成多页；每页可写“备注”（不朗读，随导出 JSON 保存）；点「逐页配音」按页顺序一次合成，每页一个 MP3，之后逐页试听，保存时自动打包 ZIP（每页 MP3 + `pages.json`）。
 
 ### 中文界面预览
 
@@ -80,6 +81,24 @@
 
 > 适用场景：视频字幕、剪辑对齐、外语跟读、逐句复习、播客文稿等。
 
+### 亮点功能：导入文件 · 逐页旁白配音（工作助手模式）
+
+把文档**逐页拆开、逐页配音、备注存档**一气呵成：
+
+1. 点「**导入文件**」选择 `txt / md / docx / pdf`，文档自动拆成多页，正文区下方出现分页工具条（上一页 / 下一页 + 页码 + 备注框）；
+2. 每页正文会朗读，备注**不朗读**（可写旁白说明、字幕提示、剪辑备注等），编辑正文或备注都会自动保存回页面；
+3. 点「**生成音频**」合成当前页，或点「**逐页配音**」按顺序把全部页面一次合成，进度显示“第 X/N 页”；
+4. 完成后各页可随时**试听**（无需重新合成），点「**保存下载**」自动打包为 ZIP：每页一个 `page_001.mp3`… + `pages.json`；
+5. `pages.json` 记录每页文本、备注与逐句时间轴，适合视频剪辑、旁白配音、工作助理等场景。
+
+```text
+pages_archive.zip
+├── page_001.mp3
+├── page_002.mp3
+├── …
+└── pages.json   # { pages: [ { index, text, note, audio, timeline } ] }
+```
+
 ### 下载与使用
 
 1. 在 [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) 下载 `EdgeTTSGui-Setup.exe`，安装时可选任意磁盘或文件夹。
@@ -94,7 +113,7 @@
 
 **Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **WangYufan**.
 
-The project is designed as a general-purpose open-source tool. It features a **Timeline JSON + live sentence highlight** mode (Save bundles the MP3 and timeline into one ZIP) and a **Language → Gender → Voice** cascading voice picker across hundreds of voices. It also includes practical safeguards for real-world network conditions: service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt.
+The project is designed as a general-purpose open-source tool. It features an **Import & page-by-page dubbing** work-assistant mode (txt / md / docx / pdf), a **Timeline JSON + live sentence highlight** mode (Save bundles the MP3 and timeline into one ZIP), and a **Language → Gender → Voice** cascading voice picker across hundreds of voices. It also includes practical safeguards for real-world network conditions: service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt.
 
 ## Interface Preview
 
@@ -119,6 +138,7 @@ The project is designed as a general-purpose open-source tool. It features a **T
 | Area | What it provides |
 | --- | --- |
 | **Text to MP3** | Paste Markdown, plain text, or HTML-derived text and export a full MP3 file. |
+| **Import & page-by-page dubbing** | Import `txt / md / docx / pdf`; the document is auto-split into pages with a page toolbar (prev / next + page number + a per-page **note** that is never spoken). **Dub All Pages** synthesizes every page in order with page-level progress, then Play previews the current page's audio and Save bundles each page MP3 plus `pages.json` (page text, notes, per-page sentence timeline) into one ZIP. |
 | **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. |
 | **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
 | **Multi-level voice picker** | Voices are fetched once and grouped locally into **Language → Gender → Voice** (built-in grouping engine) — no more scrolling a giant list. Male/female voices are rich across hundreds of languages; Chinese, Cantonese, English and more all sound natural, never robotic. |
@@ -208,6 +228,13 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 5. After generation, click **▶ Play** to listen, or **Save Audio** to export the MP3 — both reuse the generated audio with no re-rendering.
 6. Watch the status line and progress bar during generation; the bar stays at 100% when done.
 
+### Work-Assistant Mode: Import a File and Dub It Page by Page
+
+1. Click **Import File** and choose a `txt / md / docx / pdf`. The app splits the document into pages and shows the page toolbar.
+2. Edit the page text freely (it is read aloud) and fill in the **Note** field (never spoken — handy for narration cues or editing remarks).
+3. Click **Generate Audio** to synthesize just the current page, or **Dub All Pages** to synthesize the whole book in order (progress shows page X/N).
+4. Afterwards, **Play** previews the current page and **Save Audio** produces a single ZIP: one MP3 per page plus `pages.json` with every page's text, note, and per-page sentence timeline — no re-rendering needed.
+
 ## Network and Proxy
 
 Edge TTS is an online service. The application performs a reachability test against the Edge speech endpoint and reads common proxy variables:
@@ -265,6 +292,7 @@ ms-edge-tts-gui/
 ├── tts_engine.py                # Edge TTS streaming, progress, network and stall handling
 ├── text_utils.py                # Markdown/HTML cleanup and preview text extraction
 ├── voice_groups.py              # Local grouping engine: Language → Gender → Voice
+├── page_import.py                # Import txt/md/docx/pdf and split into narration-ready pages
 
 ├── assets/                      # Icon and README interface previews
 ├── installer/EdgeTTSGui.iss     # Inno Setup installer definition
@@ -296,7 +324,7 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.1.1
+git tag v1.2.0
 git push origin v1.1.1
 ```
 

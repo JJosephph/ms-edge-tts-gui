@@ -1,5 +1,11 @@
 # Release Notes
 
+## v1.2.0
+
+### New
+
+- **Import & page-by-page dubbing (work-assistant mode)** — resolves issue #1: import `txt / md / docx / pdf` and the app auto-splits the document into pages. Each page carries its own **Note** (never spoken, exported with the metadata). **Dub All Pages** synthesizes every page in order with page-level progress (page X/N) and retry/stall protection; afterwards each page can be previewed without re-rendering, and **Save Audio** bundles every page MP3 plus `pages.json` (page text, notes, per-page sentence timeline) into one ZIP.
+
 ## v1.1.2
 
 ### Fixed

@@ -1,3 +1,5 @@
 edge-tts>=7.2
 customtkinter>=5.2
 pygame>=2.5
+python-docx>=1.1
+pypdf>=4.0
