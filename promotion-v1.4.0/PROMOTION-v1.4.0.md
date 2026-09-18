@@ -13,10 +13,20 @@
 
 ## 配图顺序
 
-1. `assets/ui-v14-normal.png`：普通模式，输入框直接生成全文音频
-2. `assets/ui-v14-page.png`：逐页模式，导入 TXT 后按 `[分页]` 生成页面音频
-3. `assets/ui-v14-line.png`：逐行模式，每个非空行生成一个独立音频
-4. `assets/ui-v14-english.png`：英文深色界面，适合英文帖子或海外平台
+1. `ui-v14-normal.png`：普通模式，输入框直接生成全文音频
+2. `ui-v14-page.png`：逐页模式，导入 TXT 后按 `[分页]` 生成页面音频
+3. `ui-v14-line.png`：逐行模式，每个非空行生成一个独立音频
+4. `ui-v14-english.png`：英文深色界面，适合英文帖子或海外平台
+
+### 配图预览
+
+![普通模式：输入框直接生成全文音频](ui-v14-normal.png)
+
+![逐页模式：导入文件并按分页生成音频](ui-v14-page.png)
+
+![逐行模式：每个非空行生成一个音频](ui-v14-line.png)
+
+![英文深色界面](ui-v14-english.png)
 
 ## 主推文
 
