@@ -37,17 +37,20 @@
 
 ## 中文说明
 
-**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。将文章、笔记、脚本等文字合成为自然的 MP3 音频，不需要 API Key。它支持**导入文件 · 逐页旁白配音**（工作助手模式）与**时间轴 JSON + 试听逐句高亮**（保存时自动打包 ZIP），并提供**语言 → 性别 → 音色**三级语音选择，几百个音色不再大海捞针。界面可随时切换中文和 English，适合全世界用户。
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、SRT 字幕、时间轴 JSON、逐句试听高亮和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
+- **三种工作模式**：普通模式直接读取输入框全文；逐页模式按 `[分页]` 标记生成一页一个音频；逐行模式按每个非空行生成一个音频。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
 - **时间轴 JSON + 试听高亮**：主界面勾选后，保存/下载时自动打包 ZIP（内含 MP3 与同名 `.timeline.json`，每句起止秒数）；试听时正在朗读的句子会在文章中实时高亮。
+- **独立句间停顿**：用毫秒精确设置每句话之间的静音间隔，不改变人声本身的语速；时间轴和字幕会同步后移。
+- **SRT 字幕**：勾选“生成 SRT 字幕”后，每句对应一条字幕，时间严格匹配最终音频，可随 MP3 一起导出。
 - **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
 - **三级语音选择**：语音一次性从远端拉取后在本地按 **语言 → 性别 → 音色** 分组（内置分组引擎），不用再大海捞针；默认保留 `en-US-AndrewMultilingualNeural`（英语男声），可随时自选。
 - **音色自然丰富**：支持几百种语言、数百个音色，男声、女声都非常丰富；无论中文、粤语、英语还是其他外语，都是十分自然的 TTS 朗读，不是机器音——用过 Edge 朗读功能的人都懂。
 - **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；「恢复初始设置」可一键还原。
 - **不占空间**：生成的音频只保存在一个临时 MP3 里，可自定义目录、打开或清理，关闭软件时自动删除。
-- **导入文件 · 逐页旁白配音**：直接导入 `txt / md / docx / pdf`，自动拆分成多页；每页可写“备注”（不朗读，随导出 JSON 保存）；点「逐页配音」按页顺序一次合成，每页一个 MP3，之后逐页试听，保存时自动打包 ZIP（每页 MP3 + `pages.json`）。
+- **文件导入与示例**：逐页、逐行模式支持 `txt / md / docx / pdf`；界面提供示例 TXT 下载按钮，方便按正确格式准备 100 行以上的批量文稿。
 
 ### 中文界面预览
 
@@ -82,22 +85,51 @@
 
 > 适用场景：视频字幕、剪辑对齐、外语跟读、逐句复习、播客文稿等。
 
-### 亮点功能：导入文件 · 逐页旁白配音（工作助手模式）
+### 三种工作模式
 
-把文档**逐页拆开、逐页配音、备注存档**一气呵成：
+#### 1. 普通模式
 
-1. 点「**导入文件**」选择 `txt / md / docx / pdf`，文档自动拆成多页，正文区下方出现分页工具条（上一页 / 下一页 + 页码 + 备注框）；
-2. 每页正文会朗读，备注**不朗读**（可写旁白说明、字幕提示、剪辑备注等），编辑正文或备注都会自动保存回页面；
-3. 点「**生成音频**」合成当前页，或点「**逐页配音**」按顺序把全部页面一次合成，进度显示“第 X/N 页”；
-4. 完成后各页可随时**试听**（无需重新合成），点「**保存下载**」自动打包为 ZIP：每页一个 `page_001.mp3`… + `pages.json`；
-5. `pages.json` 记录每页文本、备注与逐句时间轴，适合视频剪辑、旁白配音、工作助理等场景。
+默认模式无需导入文件，也不要求分页。把完整文稿粘贴到左侧输入框，点击「**生成音频**」即可得到一个 MP3。输入框里的换行只作为朗读文本的一部分，不会自动拆成多个文件。
+
+#### 2. 逐页模式
+
+适合按章节、镜头或段落生成音频。点击「**导入文件**」选择 `txt / md / docx / pdf`，TXT/Markdown 推荐使用单独一行的 `[分页]` 标记：
 
 ```text
-pages_archive.zip
-├── page_001.mp3
-├── page_002.mp3
-├── …
-└── pages.json   # { pages: [ { index, text, note, audio, timeline } ] }
+这是第一页的内容。
+[分页]
+这是第二页的内容。
+[分页]
+这是第三页的内容。
+```
+
+`[分页]` 不会被朗读。没有显式标记时，文本中的空行块也可以作为页面。每页支持备注，备注不会朗读，会写入 `pages.json`。点击「**逐页配音**」后，每页生成一个 MP3，最后可导出 ZIP。
+
+#### 3. 逐行模式
+
+适合视频解说、短句旁白和批量字幕。可以导入 TXT，也可以直接粘贴文本后点击「**按行准备**」：每个非空行生成一个独立音频，空行自动忽略。
+
+```text
+第一句旁白，生成 line_001.mp3
+第二句旁白，生成 line_002.mp3
+第三句旁白，生成 line_003.mp3
+```
+
+点击「**逐行配音**」后，软件按行顺序合成，完成后保存为 ZIP，包含 `line_001.mp3`、`line_002.mp3` 等音频以及 `lines.json`。页面或行都可以先单独试听、修改，再批量生成。逐页和逐行模式都提供「**示例文件**」按钮。
+
+### 句间停顿与字幕
+
+- 在右侧「**句间停顿**」输入毫秒数（`0–10000 ms`），只增加句子之间的静音，不改变人声语速。
+- 开启「**生成 SRT 字幕**」后，每句生成一条字幕；字幕时间会包含句间停顿，和最终 MP3 严格对应。
+- 开启「**时间轴 JSON + 试听高亮**」后，可同时导出 `.timeline.json`；批量 ZIP 会按每页或每行保存对应的 MP3、SRT 和时间轴文件。
+
+```text
+lines_archive.zip
+├── line_001.mp3
+├── line_001.srt       # 开启 SRT 时生成
+├── line_002.mp3
+├── line_002.srt
+└── lines.json         # 文本、备注、音频、时间轴和字幕文件名
 ```
 
 ### 下载与使用
@@ -114,7 +146,7 @@ pages_archive.zip
 
 **Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **WangYufan**.
 
-The project is designed as a general-purpose open-source tool. It features an **Import & page-by-page dubbing** work-assistant mode (txt / md / docx / pdf), a **Timeline JSON + live sentence highlight** mode (Save bundles the MP3 and timeline into one ZIP), and a **Language → Gender → Voice** cascading voice picker across hundreds of voices. It also includes practical safeguards for real-world network conditions: service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt.
+The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page or line batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt help with real-world network conditions.
 
 ## Interface Preview
 
@@ -139,12 +171,15 @@ The project is designed as a general-purpose open-source tool. It features an **
 | Area | What it provides |
 | --- | --- |
 | **Text to MP3** | Paste Markdown, plain text, or HTML-derived text and export a full MP3 file. |
-| **Import & page-by-page dubbing** | Import `txt / md / docx / pdf`; the document is auto-split into pages with a page toolbar (prev / next + page number + a per-page **note** that is never spoken). **Dub All Pages** synthesizes every page in order with page-level progress, then Play previews the current page's audio and Save bundles each page MP3 plus `pages.json` (page text, notes, per-page sentence timeline) into one ZIP. |
+| **Three work modes** | **Normal** reads the composer text as one audio file. **Page** imports `txt / md / docx / pdf`, splits on a standalone `[分页]` marker (or blank-line blocks when no marker is present), and creates one audio file per page. **Line** imports a file or prepared text and creates one audio file for every non-empty line. |
+| **Batch page / line export** | Page and line modes show ordered progress and export numbered MP3 files plus `pages.json` or `lines.json`; optional SRT, timeline JSON, and source notes are included with the matching item. A downloadable example TXT is available in both batch modes. |
 | **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. |
 | **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
 | **Multi-level voice picker** | Voices are fetched once and grouped locally into **Language → Gender → Voice** (built-in grouping engine) — no more scrolling a giant list. Male/female voices are rich across hundreds of languages; Chinese, Cantonese, English and more all sound natural, never robotic. |
 | **Original workflow compatibility** | Default settings mirror the existing RPA workflow: `en-US-AndrewMultilingualNeural`, rate `+0%`, volume `+0%`, pitch `+0Hz`. |
 | **Timeline JSON + highlight** | Optional one-click toggle on the main UI: saving bundles the MP3 and a `.timeline.json` (each sentence's start/end seconds) into one ZIP, and during Play the sentence being read is highlighted live in the article. A " ? " help button shows a JSON example and a highlight demo. |
+| **Independent sentence pause** | Add silence between sentences in precise milliseconds without changing the voice's speaking rate. The pause is reflected in audio duration, timeline JSON, and SRT timestamps. |
+| **SRT subtitles** | Generate one SRT cue per sentence. Timings match the final audio, including configured sentence pauses; batch ZIP exports place the subtitle beside its MP3. |
 | **Restore defaults** | The voice-deck button resets voice to `en-US-AndrewMultilingualNeural` and rate/volume/pitch to `+0%`/`+0%`/`+0Hz` in one click. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
 | **Network protection** | Checks Edge TTS service availability and detects proxy environment variables before generation. |
@@ -223,19 +258,14 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 
 ## Using the App
 
-1. **Paste your text** into the Composer panel.
+1. **Choose a mode**. Normal mode is the default and needs only the Composer text box. Page and Line modes are selected manually when you want batch output.
 2. **Choose a voice** from the Voice Deck — pick **Language**, then **Gender**, then the final **Voice** from the filtered list. The default is the English male voice `en-US-AndrewMultilingualNeural`; use **Restore defaults** at any time to reset voice and rate/volume/pitch.
-3. **Adjust rate, volume, and pitch** if needed.
-4. Click **Generate Audio** to synthesize the full text once.
-5. After generation, click **▶ Play** to listen, or **Save Audio** to export the MP3 — both reuse the generated audio with no re-rendering.
-6. Watch the status line and progress bar during generation; the bar stays at 100% when done.
-
-### Work-Assistant Mode: Import a File and Dub It Page by Page
-
-1. Click **Import File** and choose a `txt / md / docx / pdf`. The app splits the document into pages and shows the page toolbar.
-2. Edit the page text freely (it is read aloud) and fill in the **Note** field (never spoken — handy for narration cues or editing remarks).
-3. Click **Generate Audio** to synthesize just the current page, or **Dub All Pages** to synthesize the whole book in order (progress shows page X/N).
-4. Afterwards, **Play** previews the current page and **Save Audio** produces a single ZIP: one MP3 per page plus `pages.json` with every page's text, note, and per-page sentence timeline — no re-rendering needed.
+3. **Adjust rate, volume, pitch, and sentence pause** if needed. Sentence pause is silence between sentences and is measured in milliseconds.
+4. In **Normal** mode, paste a complete script and click **Generate Audio** to create one MP3. Newlines remain part of the same narration.
+5. In **Page** mode, click **Import File**, choose `txt / md / docx / pdf`, review pages, and use **Dub All Pages** to synthesize one MP3 per page. A standalone `[分页]` line is the explicit page separator; the marker is not spoken.
+6. In **Line** mode, import a TXT or paste prepared text, then choose **Prepare Lines**. Every non-empty line becomes one item; click **Dub All Lines** to synthesize `line_001.mp3`, `line_002.mp3`, and so on.
+7. Enable **Generate SRT subtitles** when you want one subtitle cue per sentence. Page and line batches can be saved as a ZIP with the numbered MP3 files, matching SRT/timeline files, and `pages.json` or `lines.json`.
+8. After generation, click **Play** to listen or **Save Audio** to export. Watch the status line and progress bar during generation; the bar stays at 100% when done.
 
 ## Network and Proxy
 
@@ -294,7 +324,7 @@ ms-edge-tts-gui/
 ├── tts_engine.py                # Edge TTS streaming, progress, network and stall handling
 ├── text_utils.py                # Markdown/HTML cleanup and preview text extraction
 ├── voice_groups.py              # Local grouping engine: Language → Gender → Voice
-├── page_import.py                # Import txt/md/docx/pdf and split into narration-ready pages
+├── page_import.py                # Import txt/md/docx/pdf and split into pages or non-empty lines
 
 ├── assets/                      # Icon and README interface previews
 ├── installer/EdgeTTSGui.iss     # Inno Setup installer definition
@@ -326,8 +356,8 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.3.0
-git push origin v1.3.0
+git tag v1.4.0
+git push origin v1.4.0
 ```
 
 ## Privacy and Service Notice

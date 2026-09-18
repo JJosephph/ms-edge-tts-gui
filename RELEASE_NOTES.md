@@ -1,5 +1,27 @@
 # Release Notes
 
+## v1.4.0
+
+### New
+
+- **Three narration modes**: Normal mode turns the composer text into one audio file; Page mode imports documents and creates one audio file per `[分页]`-separated page; Line mode imports a file or prepared text and creates one audio file for every non-empty line.
+- **Independent sentence pause**: configure silence between sentences in milliseconds without changing the speaking rate. The setting is applied to normal, page, and line generation.
+- **SRT subtitles**: optionally export sentence-level SRT subtitles whose timings include the configured sentence pauses. Normal saves and batch ZIP bundles include the SRT when enabled.
+- **Example TXT files**: Page and Line modes provide downloadable example files showing the exact input format.
+- **Batch metadata and ZIP bundles**: page and line exports include numbered MP3 files plus `pages.json` or `lines.json`; timeline JSON and SRT files can be included together.
+
+### Fixed
+
+- Fixed batch export keeping only the last line/page when source indexes were duplicated. Batch results now use their unique in-batch position as the storage key while preserving source indexes in metadata.
+- Fixed packaged builds failing sentence-pause processing because `miniaudio`'s `_cffi_backend` dependency was not included. Local and GitHub Actions builds now bundle `miniaudio`, `lameenc`, `cffi`, and `_cffi_backend` explicitly.
+- Missing audio post-processing components now report a clear error instead of repeatedly retrying an already-generated audio file.
+
+### Improved
+
+- Normal mode no longer depends on pagination. Pagination and line splitting are opt-in workflow modes selected from the UI.
+- Page mode recognizes an explicit standalone `[分页]` marker (and its English form) without speaking the marker; blank-line blocks remain supported when no marker is present.
+- The local release script now stops immediately when either PyInstaller build fails, preventing a stale locked executable from being mistaken for a fresh artifact.
+
 ## v1.3.0
 
 ### Fixed

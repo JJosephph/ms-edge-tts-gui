@@ -147,6 +147,93 @@ def build_sentence_timeline(
     }
 
 
+def timeline_to_srt(timeline: Optional[dict]) -> str:
+    """Convert the final sentence timeline to UTF-8 SRT text."""
+    def stamp(seconds: float) -> str:
+        milliseconds = max(0, round(float(seconds) * 1000))
+        hours, milliseconds = divmod(milliseconds, 3_600_000)
+        minutes, milliseconds = divmod(milliseconds, 60_000)
+        secs, milliseconds = divmod(milliseconds, 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
+
+    cues = []
+    for number, item in enumerate((timeline or {}).get("sentences", []), start=1):
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        cues.append(
+            f"{number}\n{stamp(item.get('start', 0))} --> {stamp(item.get('end', 0))}\n{text}"
+        )
+    return "\n\n".join(cues) + ("\n" if cues else "")
+
+
+def insert_sentence_pauses(audio_path: str, timeline: dict, pause_ms: int) -> dict:
+    """Insert exact PCM silence after each sentence and shift later cue times."""
+    if pause_ms <= 0:
+        return timeline
+    entries = list((timeline or {}).get("sentences", []))
+    if len(entries) < 2:
+        return timeline
+
+    try:
+        import lameenc
+        import miniaudio
+    except ImportError as exc:  # pragma: no cover - packaging dependency
+        raise AudioPostProcessError(
+            "缺少音频停顿处理组件，请重新安装完整版本。"
+        ) from exc
+
+    decoded = miniaudio.decode_file(
+        audio_path,
+        output_format=miniaudio.SampleFormat.SIGNED16,
+        nchannels=1,
+        sample_rate=24000,
+    )
+    pcm = bytes(decoded.samples)
+    bytes_per_frame = 2
+    silence_frames = round(decoded.sample_rate * pause_ms / 1000)
+    silence = b"\x00" * silence_frames * bytes_per_frame
+    output = bytearray()
+    cursor = 0
+    shift = 0.0
+    pause_seconds = pause_ms / 1000.0
+    adjusted = []
+
+    for index, entry in enumerate(entries):
+        item = dict(entry)
+        item["start"] = round(float(item["start"]) + shift, 4)
+        item["end"] = round(float(item["end"]) + shift, 4)
+        adjusted.append(item)
+        if index >= len(entries) - 1:
+            continue
+        end_frame = max(cursor // bytes_per_frame, round(float(entry["end"]) * decoded.sample_rate))
+        end_byte = min(len(pcm), end_frame * bytes_per_frame)
+        output.extend(pcm[cursor:end_byte])
+        output.extend(silence)
+        cursor = end_byte
+        shift += pause_seconds
+
+    output.extend(pcm[cursor:])
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(48)
+    encoder.set_in_sample_rate(decoded.sample_rate)
+    encoder.set_channels(1)
+    encoder.set_quality(2)
+    encoded = encoder.encode(bytes(output)) + encoder.flush()
+    temp_path = audio_path + ".pause"
+    try:
+        with open(temp_path, "wb") as handle:
+            handle.write(encoded)
+        TTSEngine._safe_replace(temp_path, audio_path)
+    finally:
+        TTSEngine._safe_unlink(temp_path)
+
+    result = dict(timeline)
+    result["sentences"] = adjusted
+    result["sentence_pause_ms"] = pause_ms
+    return result
+
+
 
 # edge-tts 使用的真实服务地址（用于网络探测，最贴近真实链路）
 PROBE_URL = "https://speech.platform.bing.com/"
@@ -156,6 +243,10 @@ PROBE_URL = "https://speech.platform.bing.com/"
 
 class UserCanceled(Exception):
     """用户主动取消。"""
+
+
+class AudioPostProcessError(RuntimeError):
+    """音频已生成，但句间停顿后处理无法完成。"""
 
 
 @dataclass
@@ -264,6 +355,7 @@ class TTSConfig:
     rate: str = "+0%"
     volume: str = "+0%"
     pitch: str = "+0Hz"
+    sentence_pause_ms: int = 0
 
 
 class TTSEngine:
@@ -283,6 +375,7 @@ class TTSEngine:
         self.proxy = detect_proxy()
         self.sentence_boundaries: list = []
         self.timeline: Optional[dict] = None
+        self.error_message = ""
 
     # ---------------- 对外入口 ----------------
 
@@ -304,6 +397,11 @@ class TTSEngine:
             if outcome == "cancel":
                 self.on_log("任务已取消。")
                 return {"status": "canceled"}
+            if outcome == "error":
+                return {
+                    "status": "error",
+                    "error": self.error_message or "音频后处理失败。",
+                }
             # retry
             if attempts >= MAX_RETRIES:
                 self.on_log("已达最大重试次数，任务失败。")
@@ -317,6 +415,7 @@ class TTSEngine:
         """执行一次流式生成，返回 'done' | 'cancel' | 'retry'。"""
         temp_path = self._temp_path(output_path)
         self._safe_unlink(temp_path)
+        self.error_message = ""
         self.sentence_boundaries = []
         self.timeline = None
 
@@ -416,6 +515,10 @@ class TTSEngine:
             final_path = os.path.abspath(output_path)
             os.makedirs(os.path.dirname(final_path), exist_ok=True)
             self._safe_replace(temp_path, final_path)
+            if cfg.sentence_pause_ms > 0:
+                self.timeline = insert_sentence_pauses(
+                    final_path, self.timeline, cfg.sentence_pause_ms
+                )
             self.on_progress(100, written)
             return "done"
 
@@ -425,6 +528,11 @@ class TTSEngine:
         except asyncio.CancelledError:
             self._safe_unlink(temp_path)
             raise
+        except AudioPostProcessError as exc:
+            self._safe_unlink(temp_path)
+            self.error_message = str(exc)
+            self.on_log(f"[警告] {self.error_message}")
+            return "error"
         except Exception as exc:  # noqa: BLE001 - 统一兜底并让用户决定
             self._safe_unlink(temp_path)
             hint = self._classify_error(exc)
