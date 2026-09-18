@@ -55,7 +55,18 @@
 ### 中文界面预览
 
 <p align="center">
-  <img src="assets/ui-preview-zh.png" alt="中文界面预览" width="900">
+  <img src="assets/ui-v14-normal.png" alt="v1.4.0 普通模式：输入框直接生成全文音频" width="900">
+</p>
+<p align="center">
+  <sub>普通模式：不要求分页，直接把左侧输入框的完整文稿生成一个音频；右侧可设置句间停顿、SRT 字幕和时间轴。</sub>
+</p>
+
+<p align="center">
+  <img src="assets/ui-v14-page.png" alt="v1.4.0 逐页模式：导入文件并按页生成音频" width="440">
+  <img src="assets/ui-v14-line.png" alt="v1.4.0 逐行模式：每个非空行生成一个音频" width="440">
+</p>
+<p align="center">
+  <sub>左：逐页模式，导入 TXT 后按 <code>[分页]</code> 检查每页；右：逐行模式，显示 <code>1/5 行</code>，每个非空行独立生成音频。</sub>
 </p>
 
 ### 亮点功能：时间轴 JSON + 试听逐句高亮
@@ -151,19 +162,20 @@ The project is designed as a general-purpose open-source tool with three focused
 ## Interface Preview
 
 <p align="center">
-  <img src="assets/ui-preview-dark.png" alt="Dark theme preview" width="900">
+  <img src="assets/ui-v14-english.png" alt="v1.4.0 English dark theme normal mode preview" width="900">
 </p>
 
 <p align="center">
-  <sub>Night theme · Composer + Voice Deck workflow</sub>
+  <sub>English UI · Dark theme · Normal mode composer with sentence pause, SRT, and timeline controls</sub>
 </p>
 
 <p align="center">
-  <img src="assets/ui-preview-light.png" alt="Light theme preview" width="900">
+  <img src="assets/ui-v14-page.png" alt="v1.4.0 page mode preview" width="440">
+  <img src="assets/ui-v14-line.png" alt="v1.4.0 line mode preview" width="440">
 </p>
 
 <p align="center">
-  <sub>Day theme · Same focused layout, optimized for bright environments</sub>
+  <sub>Page mode and line mode · Import, review, and batch-export the units you prepared</sub>
 </p>
 
 ## Features
