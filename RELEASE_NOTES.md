@@ -21,6 +21,7 @@
 - Normal mode no longer depends on pagination. Pagination and line splitting are opt-in workflow modes selected from the UI.
 - Page mode recognizes an explicit standalone `[分页]` marker (and its English form) without speaking the marker; blank-line blocks remain supported when no marker is present.
 - The local release script now stops immediately when either PyInstaller build fails, preventing a stale locked executable from being mistaken for a fresh artifact.
+- Issue #2 is completed by the sentence-pause and SRT subtitle workflow in this release.
 
 ## v1.3.0
 
