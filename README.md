@@ -55,18 +55,14 @@
 ### 中文界面预览
 
 <p align="center">
-  <img src="assets/ui-v14-normal.png" alt="v1.4.0 普通模式：输入框直接生成全文音频" width="900">
+  <img src="assets/ui-v141-normal.png" alt="v1.4.1 普通模式：输入框直接生成全文音频，支持句末停顿指令" width="900">
 </p>
 <p align="center">
   <sub>普通模式：不要求分页，直接把左侧输入框的完整文稿生成一个音频；右侧可设置句间停顿、SRT 字幕和时间轴。</sub>
 </p>
 
 <p align="center">
-  <img src="assets/ui-v14-page.png" alt="v1.4.0 逐页模式：导入文件并按页生成音频" width="440">
-  <img src="assets/ui-v14-line.png" alt="v1.4.0 逐行模式：每个非空行生成一个音频" width="440">
-</p>
-<p align="center">
-  <sub>左：逐页模式，导入 TXT 后按 <code>[分页]</code> 检查每页；右：逐行模式，显示 <code>1/5 行</code>，每个非空行独立生成音频。</sub>
+  <sub>当前版本主界面截图：普通模式默认直接生成一个音频；切换到逐页或逐行模式后，可导入示例 TXT 并批量导出。</sub>
 </p>
 
 ### 亮点功能：时间轴 JSON + 试听逐句高亮
@@ -130,7 +126,8 @@
 
 ### 句间停顿与字幕
 
-- 在右侧「**句间停顿**」输入毫秒数（`0–10000 ms`），只增加句子之间的静音，不改变人声语速。
+- 在右侧「**默认句间停顿**」输入毫秒数（`0–10000 ms`），设置值会覆盖 Edge TTS 原生句间空隙，最终静音时长按毫秒精确生效，不改变人声语速。
+- 点击编辑区上方「**句末停顿**」可批量插入停顿指令；也可以手动写入 `[pause:500ms]`、`[pause:1.5s]`、`[pause:weak]`、`[pause:medium]`、`[pause:strong]` 或 `[pause]`。这些指令不会被朗读，单句指令优先于全局默认值。
 - 开启「**生成 SRT 字幕**」后，每句生成一条字幕；字幕时间会包含句间停顿，和最终 MP3 严格对应。
 - 开启「**时间轴 JSON + 试听高亮**」后，可同时导出 `.timeline.json`；批量 ZIP 会按每页或每行保存对应的 MP3、SRT 和时间轴文件。
 
@@ -162,7 +159,7 @@ The project is designed as a general-purpose open-source tool with three focused
 ## Interface Preview
 
 <p align="center">
-  <img src="assets/ui-v14-english.png" alt="v1.4.0 English dark theme normal mode preview" width="900">
+  <img src="assets/ui-v141-normal.png" alt="v1.4.1 interface preview" width="900">
 </p>
 
 <p align="center">
@@ -170,12 +167,7 @@ The project is designed as a general-purpose open-source tool with three focused
 </p>
 
 <p align="center">
-  <img src="assets/ui-v14-page.png" alt="v1.4.0 page mode preview" width="440">
-  <img src="assets/ui-v14-line.png" alt="v1.4.0 line mode preview" width="440">
-</p>
-
-<p align="center">
-  <sub>Page mode and line mode · Import, review, and batch-export the units you prepared</sub>
+  <sub>Current release preview · switch to Page or Line mode for import, review, and batch export.</sub>
 </p>
 
 ## Features
@@ -368,8 +360,8 @@ The installer is generated with Inno Setup and includes the bundled application 
 Pushing a version tag matching `v*` runs `.github/workflows/build-release.yml`. The workflow builds the Windows directory app, the portable EXE, and the Inno Setup installer, then uploads them to a GitHub Release.
 
 ```bash
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.4.1
+git push origin v1.4.1
 ```
 
 ## Privacy and Service Notice

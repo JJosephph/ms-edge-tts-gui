@@ -34,6 +34,7 @@ from tts_engine import (
     TTSConfig,
     TTSEngine,
     detect_proxy,
+    insert_sentence_pause_directives,
     list_tts_voices,
     probe_network,
     timeline_to_srt,
@@ -49,7 +50,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -165,6 +166,7 @@ class App(ctk.CTk):
         self._btn_next_page = None
         self._btn_import = None
         self._btn_download_example = None
+        self._btn_sentence_pause = None
         self._btn_dub_pages = None
 
         self._build_ui()
@@ -221,8 +223,16 @@ class App(ctk.CTk):
         "timeline_help_note": {"zh": "提示：高亮在点击「试听」后开始，随播放进度逐句跳转；保存时音频与时间轴 JSON 会打包成 ZIP 存到你选择的目录。", "en": "Tip: highlighting starts when you click Play and follows the progress; the audio and timeline JSON are saved together as a ZIP."},
         "timeline_on": {"zh": "已开启：保存时打包 ZIP（音频 + 时间轴 JSON），试听时高亮当前句子", "en": "On: saves a ZIP bundle (audio + timeline JSON); highlights the sentence being read"},
         "timeline_off": {"zh": "已关闭：不再输出时间轴 JSON 与试听高亮", "en": "Off: no timeline JSON or playback highlight"},
-        "sentence_pause": {"zh": "句间停顿", "en": "Sentence pause"},
+        "sentence_pause": {"zh": "默认句间停顿", "en": "Default sentence pause"},
         "pause_unit": {"zh": "毫秒", "en": "ms"},
+        "pause_directive_help": {"zh": "支持 [pause:500ms]、[pause:1.5s]、[pause:weak/medium/strong]；指令不会被朗读。", "en": "Supports [pause:500ms], [pause:1.5s], and [pause:weak/medium/strong]; markers are not spoken."},
+        "sentence_pause_action": {"zh": "句末停顿", "en": "End-of-sentence pause"},
+        "pause_dialog_title": {"zh": "批量插入句末停顿", "en": "Insert end-of-sentence pauses"},
+        "pause_dialog_hint": {"zh": "在每个句末自动加入 pause 指令（最后一句不添加）。已有指令会跳过。", "en": "Add a pause marker after each sentence (the final sentence is skipped). Existing markers are preserved."},
+        "pause_custom": {"zh": "自定义毫秒", "en": "Custom ms"},
+        "pause_apply": {"zh": "插入", "en": "Insert"},
+        "pause_inserted": {"zh": "已插入 {count} 个句末停顿指令。", "en": "Inserted {count} end-of-sentence pause marker(s)."},
+        "pause_invalid": {"zh": "请输入 0 到 10000 之间的整数毫秒。", "en": "Enter an integer from 0 to 10000 milliseconds."},
         "srt_subtitles": {"zh": "生成 SRT 字幕", "en": "Generate SRT subtitles"},
 
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
@@ -597,6 +607,7 @@ class App(ctk.CTk):
         title_actions.pack(side="right")
         self._btn_import = ctk.CTkButton(title_actions, text=self._t("import_file"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_import_file)
         self._btn_download_example = ctk.CTkButton(title_actions, text=self._t("download_example"), width=72, height=26, font=self._font(size=12), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("muted"), command=self._on_download_example)
+        self._btn_sentence_pause = ctk.CTkButton(title_actions, text=self._t("sentence_pause_action"), width=86, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_sentence_pause)
         self._btn_prepare_lines = ctk.CTkButton(title_actions, text=self._t("prepare_lines"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_prepare_lines)
         self._btn_dub_pages = ctk.CTkButton(title_actions, text=self._t("page_dub"), width=92, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF", command=self._on_dub_pages, state="disabled")
         self._char_count = ctk.CTkLabel(title_actions, text=self._t("count", count=0), text_color=self._c("muted"), font=self._font(size=12))
@@ -1131,8 +1142,11 @@ class App(ctk.CTk):
             return
         self._btn_import.pack_forget()
         self._btn_download_example.pack_forget()
+        self._btn_sentence_pause.pack_forget()
         self._btn_prepare_lines.pack_forget()
         self._btn_dub_pages.pack_forget()
+        self._btn_sentence_pause.configure(text=self._t("sentence_pause_action"))
+        self._btn_sentence_pause.pack(side="left", padx=(4, 0))
         if self._workflow_mode in ("page", "line"):
             self._btn_download_example.pack(side="left", padx=(4, 0))
             self._btn_import.pack(side="left", padx=(4, 0))
@@ -1145,7 +1159,13 @@ class App(ctk.CTk):
                 text=self._t("line_dub" if self._workflow_mode == "line" else "page_dub")
             )
             self._btn_dub_pages.pack(side="left", padx=(4, 0))
-        self._helper_label.configure(text=self._t(f"helper_{self._workflow_mode}"))
+        self._helper_label.configure(
+            text=(
+                self._t(f"helper_{self._workflow_mode}")
+                + "\n"
+                + self._t("pause_directive_help")
+            )
+        )
         self._btn_generate.configure(
             text=self._t(
                 "generate_line" if self._workflow_mode == "line" and self._pages
@@ -1796,6 +1816,109 @@ class App(ctk.CTk):
         self._save_settings()
         self._invalidate_generated()
 
+    def _on_sentence_pause(self):
+        """Open the batch action that adds inline pause markers to the editor."""
+        if self._busy:
+            return
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("pause_dialog_title"))
+        dialog.geometry("520x300")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.after(100, dialog.lift)
+
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("pause_dialog_title"),
+            font=self._font(size=18, weight="bold"),
+            text_color=self._c("text"),
+        ).pack(anchor="w", padx=24, pady=(22, 6))
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("pause_dialog_hint"),
+            wraplength=460,
+            justify="left",
+            text_color=self._c("muted"),
+        ).pack(anchor="w", padx=24, pady=(0, 16))
+
+        presets = ctk.CTkFrame(dialog, fg_color="transparent")
+        presets.pack(fill="x", padx=20)
+
+        def apply_value(raw_value):
+            try:
+                value = int(str(raw_value).strip())
+            except (TypeError, ValueError):
+                messagebox.showwarning(APP_NAME, self._t("pause_invalid"), parent=dialog)
+                return
+            if not 0 <= value <= 10000:
+                messagebox.showwarning(APP_NAME, self._t("pause_invalid"), parent=dialog)
+                return
+            if self._pages:
+                self._sync_page_from_ui()
+            current = self._textbox.get("1.0", "end-1c")
+            updated = insert_sentence_pause_directives(current, value)
+            if updated == current:
+                dialog.destroy()
+                return
+            count = len(re.findall(r"\[\s*pause\s*:", updated, re.IGNORECASE)) - len(
+                re.findall(r"\[\s*pause\s*:", current, re.IGNORECASE)
+            )
+            self._replace_textbox(updated)
+            if self._pages:
+                self._sync_page_from_ui()
+            self._invalidate_generated()
+            self.log(self._t("pause_inserted", count=max(0, count)))
+            dialog.destroy()
+
+        preset_values = (100, 150, 200, 300, 400, 600)
+        for column, value in enumerate(preset_values):
+            ctk.CTkButton(
+                presets,
+                text=f"{value} ms",
+                width=72,
+                height=32,
+                fg_color=self._c("surface_alt"),
+                hover_color=self._c("card_raised"),
+                border_width=1,
+                border_color=self._c("border"),
+                text_color=self._c("text"),
+                command=lambda value=value: apply_value(value),
+            ).grid(row=0, column=column, padx=3, pady=3)
+
+        custom = ctk.CTkFrame(dialog, fg_color="transparent")
+        custom.pack(fill="x", padx=24, pady=(16, 0))
+        ctk.CTkLabel(
+            custom,
+            text=self._t("pause_custom"),
+            text_color=self._c("muted"),
+            font=self._font(size=12, weight="bold"),
+        ).pack(side="left")
+        custom_var = tk.StringVar(value=str(self._sentence_pause_ms or 300))
+        entry = ctk.CTkEntry(
+            custom,
+            textvariable=custom_var,
+            width=100,
+            height=32,
+            justify="right",
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        entry.pack(side="left", padx=(10, 6))
+        ctk.CTkButton(
+            custom,
+            text=self._t("pause_apply"),
+            width=76,
+            height=32,
+            fg_color=self._c("primary"),
+            hover_color=self._c("primary_hover"),
+            text_color="#FFFFFF",
+            command=lambda: apply_value(custom_var.get()),
+        ).pack(side="left")
+        entry.bind("<Return>", lambda _event: apply_value(custom_var.get()))
+        entry.focus_set()
+
     def _configure_highlight_tag(self):
         try:
             self._textbox.tag_config(
@@ -2119,6 +2242,8 @@ class App(ctk.CTk):
             self._btn_import.configure(state="disabled" if busy else "normal")
         if self._btn_download_example is not None:
             self._btn_download_example.configure(state="disabled" if busy else "normal")
+        if self._btn_sentence_pause is not None:
+            self._btn_sentence_pause.configure(state="disabled" if busy else "normal")
         if self._btn_prepare_lines is not None:
             self._btn_prepare_lines.configure(state="disabled" if busy else "normal")
         self._update_page_bar()
