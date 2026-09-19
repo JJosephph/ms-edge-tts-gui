@@ -1,5 +1,19 @@
 # Release Notes
 
+## v1.5
+
+### New
+
+- **Row-oriented result browser**: “全部字幕” now uses a synchronized table where each audio item keeps its number, editable text, sentence timeline, playback controls, and regeneration action on the same row.
+- **Seekable playback timeline**: every result row shows elapsed time and total duration with a draggable green slider; dragging seeks within the MP3 and playback keeps the row highlighted.
+- **Line-end silence**: Line mode can append real silence after each generated line. The audio continues through the silent tail, and the timeline/slider duration includes and labels that padding.
+- **Batch review and export**: edit individual rows, regenerate them, regenerate the complete batch, and export the updated collection as the final ZIP from the result browser.
+
+### Improved
+
+- Improved Chinese typography, checkbox spacing, hover feedback, and high-contrast result actions for smoother interactive review.
+- Current/all preview switching now keeps row content and playback context aligned instead of separating text and subtitles into unrelated panes.
+
 ## v1.4.1
 
 ### Fixed

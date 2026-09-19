@@ -286,6 +286,7 @@ def insert_sentence_pauses(
     timeline: dict,
     pause_ms: int,
     pause_overrides: Optional[dict[int, int]] = None,
+    pause_marks: Optional[set[str]] = None,
 ) -> dict:
     """Replace native sentence gaps with exact silence durations.
 
@@ -352,7 +353,10 @@ def insert_sentence_pauses(
             float(entries[index + 1]["start"]) - original_end,
         )
         desired_pause = pause_overrides.get(index)
-        if desired_pause is None and pause_ms > 0:
+        if desired_pause is None and pause_ms > 0 and (
+            pause_marks is None
+            or str(entry.get("text", "")).rstrip()[-1:] in pause_marks
+        ):
             desired_pause = pause_ms
         if desired_pause is None:
             # No directive and no global setting: retain Edge's native gap.
@@ -395,6 +399,49 @@ def insert_sentence_pauses(
         result["sentence_pause_ms"] = pause_ms
     if pause_overrides:
         result["sentence_pause_overrides"] = pause_overrides
+    return result
+
+
+def append_audio_silence(audio_path: str, timeline: dict, pause_ms: int) -> dict:
+    """Append exact silence to the end of an audio file and extend its timeline."""
+    pause_ms = max(0, min(MAX_DIRECTIVE_PAUSE_MS, int(pause_ms)))
+    if pause_ms <= 0:
+        return timeline
+    try:
+        import lameenc
+        import miniaudio
+    except ImportError as exc:  # pragma: no cover - packaging dependency
+        raise AudioPostProcessError("缺少音频停顿处理组件，请重新安装完整版本。") from exc
+
+    decoded = miniaudio.decode_file(
+        audio_path,
+        output_format=miniaudio.SampleFormat.SIGNED16,
+        nchannels=1,
+        sample_rate=24000,
+    )
+    pcm = bytes(decoded.samples)
+    bytes_per_frame = 2
+    silence_frames = round(decoded.sample_rate * pause_ms / 1000)
+    output = pcm + (b"\x00" * silence_frames * bytes_per_frame)
+    encoder = lameenc.Encoder()
+    encoder.set_bit_rate(48)
+    encoder.set_in_sample_rate(decoded.sample_rate)
+    encoder.set_channels(1)
+    encoder.set_quality(2)
+    encoded = encoder.encode(output) + encoder.flush()
+    temp_path = audio_path + ".tail"
+    try:
+        with open(temp_path, "wb") as handle:
+            handle.write(encoded)
+        TTSEngine._safe_replace(temp_path, audio_path)
+    finally:
+        TTSEngine._safe_unlink(temp_path)
+
+    result = dict(timeline)
+    result["line_pause_ms"] = pause_ms
+    result["duration_padding_ms"] = pause_ms
+    sentence_end = max([float(item.get("end", 0)) for item in result.get("sentences", [])] or [0.0])
+    result["duration"] = round(sentence_end + pause_ms / 1000.0, 4)
     return result
 
 
@@ -520,6 +567,8 @@ class TTSConfig:
     volume: str = "+0%"
     pitch: str = "+0Hz"
     sentence_pause_ms: int = 0
+    sentence_pause_marks: tuple[str, ...] = ()
+    line_pause_ms: int = 0
 
 
 class TTSEngine:
@@ -690,6 +739,13 @@ class TTSEngine:
                     self.timeline,
                     cfg.sentence_pause_ms,
                     pause_overrides=pause_overrides,
+                    pause_marks=set(cfg.sentence_pause_marks),
+                )
+            if cfg.line_pause_ms > 0:
+                self.timeline = append_audio_silence(
+                    final_path,
+                    self.timeline,
+                    cfg.line_pause_ms,
                 )
             self.on_progress(100, written)
             return "done"

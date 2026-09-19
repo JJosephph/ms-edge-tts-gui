@@ -25,6 +25,7 @@ from typing import Optional
 import customtkinter as ctk
 import pygame
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 from tts_engine import (
@@ -50,12 +51,13 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.5"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
 UI_FONT_FAMILY = "Microsoft YaHei UI"
+UI_FONT_FALLBACKS = ("Microsoft YaHei", "SimHei", "Arial")
 SETTINGS_DIR = Path(os.environ.get("APPDATA", Path.home())) / "EdgeTTSGui"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 PREVIEW_FILENAME = "edge_tts_preview.mp3"
@@ -103,10 +105,19 @@ class TTSTask:
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        # Prefer a Chinese UI font that is actually installed so glyph metrics
+        # stay consistent instead of falling back per-widget and shifting labels.
+        installed_fonts = set(tkfont.families(self))
+        self._font_family = next(
+            (family for family in (UI_FONT_FAMILY, *UI_FONT_FALLBACKS) if family in installed_fonts),
+            UI_FONT_FAMILY,
+        )
+        ctk.ThemeManager.theme["CTkFont"]["family"] = self._font_family
 
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        self.geometry("1000x800")
-        self.minsize(880, 700)
+        # Give the composer and the settings deck enough room for readable controls.
+        self.geometry("1180x860")
+        self.minsize(1080, 760)
 
         self._ui_q: "queue.Queue" = queue.Queue()
         self._stall_req_q: "queue.Queue" = queue.Queue()
@@ -140,6 +151,14 @@ class App(ctk.CTk):
         except (TypeError, ValueError):
             saved_pause_ms = 0
         self._sentence_pause_ms = max(0, min(10000, saved_pause_ms))
+        self._sentence_pause_enabled = bool(self._settings.get("sentence_pause_enabled", self._sentence_pause_ms > 0))
+        self._line_pause_enabled = bool(self._settings.get("line_pause_enabled", False))
+        try:
+            self._line_pause_ms = max(0, min(10000, int(self._settings.get("line_pause_ms", 300))))
+        except (TypeError, ValueError):
+            self._line_pause_ms = 300
+        saved_marks = self._settings.get("sentence_pause_marks")
+        self._sentence_pause_marks = set(saved_marks) if isinstance(saved_marks, list) else set("。.!！?？")
         self._generated_timeline: dict | None = None
         self._timeline_var = None
         self._srt_var = None
@@ -157,6 +176,8 @@ class App(ctk.CTk):
         self._pages: list = []
         self._page_index = 0
         self._generated_pages: dict = {}
+        self._result_preview_callbacks: dict = {}
+        self._result_preview_refresh = None
         self._batch_dir: str | None = None
         self._note_var = None
         self._note_entry = None
@@ -168,6 +189,20 @@ class App(ctk.CTk):
         self._btn_download_example = None
         self._btn_sentence_pause = None
         self._btn_dub_pages = None
+        self._btn_result_preview = None
+        self._mode_settings_title = None
+        self._mode_settings_hint = None
+        self._pause_label = None
+        self._pause_entry = None
+        self._punctuation_label = None
+        self._punctuation_frame = None
+        self._line_pause_section = None
+        self._line_pause_entry = None
+        self._sentence_pause_check = None
+        self._line_pause_check = None
+        self._punctuation_checks = {}
+        self._timeline_check = None
+        self._srt_check = None
 
         self._build_ui()
         self._bind_events()
@@ -224,9 +259,28 @@ class App(ctk.CTk):
         "timeline_on": {"zh": "已开启：保存时打包 ZIP（音频 + 时间轴 JSON），试听时高亮当前句子", "en": "On: saves a ZIP bundle (audio + timeline JSON); highlights the sentence being read"},
         "timeline_off": {"zh": "已关闭：不再输出时间轴 JSON 与试听高亮", "en": "Off: no timeline JSON or playback highlight"},
         "sentence_pause": {"zh": "默认句间停顿", "en": "Default sentence pause"},
+        "sentence_pause_enable": {"zh": "启用句间停顿", "en": "Enable sentence pauses"},
+        "line_pause": {"zh": "行末停顿", "en": "Line-end pause"},
+        "line_pause_enable": {"zh": "启用行末停顿", "en": "Enable line-end pause"},
+        "pause_punctuation": {"zh": "按标点应用（可多选）", "en": "Apply after punctuation (multi-select)"},
+        "pause_duration": {"zh": "每次停顿", "en": "Pause length"},
+        "punctuation_comma": {"zh": "逗号", "en": "Comma"},
+        "punctuation_period": {"zh": "句号", "en": "Period"},
+        "punctuation_exclamation": {"zh": "感叹号", "en": "Exclamation"},
+        "punctuation_question": {"zh": "问号", "en": "Question"},
+        "punctuation_semicolon": {"zh": "分号", "en": "Semicolon"},
         "pause_unit": {"zh": "毫秒", "en": "ms"},
         "pause_directive_help": {"zh": "支持 [pause:500ms]、[pause:1.5s]、[pause:weak/medium/strong]；指令不会被朗读。", "en": "Supports [pause:500ms], [pause:1.5s], and [pause:weak/medium/strong]; markers are not spoken."},
-        "sentence_pause_action": {"zh": "句末停顿", "en": "End-of-sentence pause"},
+        "sentence_pause_action": {"zh": "批量插入句末停顿", "en": "Insert end pauses"},
+        "mode_settings_normal": {"zh": "普通模式 · 音频设置", "en": "Normal · Audio settings"},
+        "mode_settings_page": {"zh": "逐页模式 · 音频设置", "en": "By Page · Audio settings"},
+        "mode_settings_line": {"zh": "逐行模式 · 音频设置", "en": "By Line · Audio settings"},
+        "mode_settings_hint_normal": {"zh": "整段文本生成一个音频文件。", "en": "The full text becomes one audio file."},
+        "mode_settings_hint_page": {"zh": "每页独立生成音频，适合章节或镜头批量导出。", "en": "Each page becomes a separate audio file for batch export."},
+        "mode_settings_hint_line": {"zh": "每个非空行独立生成音频，适合短句旁白批量导出。", "en": "Each non-empty line becomes a separate audio file for short narration."},
+        "pause_label_normal": {"zh": "句间停顿", "en": "Sentence pause"},
+        "pause_label_page": {"zh": "每页默认句间停顿", "en": "Default pause per page"},
+        "pause_label_line": {"zh": "每行默认句间停顿", "en": "Default pause per line"},
         "pause_dialog_title": {"zh": "批量插入句末停顿", "en": "Insert end-of-sentence pauses"},
         "pause_dialog_hint": {"zh": "在每个句末自动加入 pause 指令（最后一句不添加）。已有指令会跳过。", "en": "Add a pause marker after each sentence (the final sentence is skipped). Existing markers are preserved."},
         "pause_custom": {"zh": "自定义毫秒", "en": "Custom ms"},
@@ -250,6 +304,31 @@ class App(ctk.CTk):
         "play": {"zh": "▶ 试听", "en": "▶ Play"},
         "save": {"zh": "保存下载", "en": "Save Audio"},
         "generated_ok": {"zh": "已生成 ✔ 可试听 / 保存", "en": "Generated ✔ Play or save"},
+        "result_preview": {"zh": "查看结果", "en": "Review result"},
+        "result_title": {"zh": "生成结果 · 试听与字幕", "en": "Generated result · Preview & subtitles"},
+        "result_audio": {"zh": "音频预览", "en": "Audio preview"},
+        "result_text": {"zh": "配音文本（可修改）", "en": "Narration text (editable)"},
+        "result_subtitles": {"zh": "SRT 字幕", "en": "SRT subtitles"},
+        "result_view_current": {"zh": "当前音频", "en": "Current audio"},
+        "result_view_all": {"zh": "全部字幕", "en": "All subtitles"},
+        "result_prev": {"zh": "上一条", "en": "Previous"},
+        "result_next": {"zh": "下一条", "en": "Next"},
+        "result_item_page": {"zh": "第 {current}/{total} 页", "en": "Page {current}/{total}"},
+        "result_item_line": {"zh": "第 {current}/{total} 行", "en": "Line {current}/{total}"},
+        "result_all_heading": {"zh": "音频 {number:03d}", "en": "Audio {number:03d}"},
+        "result_no_subtitles": {"zh": "当前结果没有可用的句级时间轴。生成时开启时间轴后即可查看字幕。", "en": "This result has no sentence timeline. Enable timeline generation to view subtitles."},
+        "result_apply": {"zh": "应用修改并重新生成", "en": "Apply edits and regenerate"},
+        "result_close": {"zh": "关闭", "en": "Close"},
+        "result_table_number": {"zh": "编号", "en": "No."},
+        "result_table_text": {"zh": "字幕文本", "en": "Subtitle text"},
+        "result_table_timeline": {"zh": "时间轴", "en": "Timeline"},
+        "result_table_actions": {"zh": "操作", "en": "Actions"},
+        "result_play": {"zh": "试听", "en": "Play"},
+        "result_stop": {"zh": "停止", "en": "Stop"},
+        "result_regenerate": {"zh": "重新生成", "en": "Regenerate"},
+        "result_regenerate_all": {"zh": "全部重新生成", "en": "Regenerate all"},
+        "result_export_zip": {"zh": "导出最终 ZIP", "en": "Export final ZIP"},
+        "result_saved": {"zh": "修改已应用", "en": "Changes applied"},
         "canceled": {"zh": "已取消", "en": "Canceled"},
         "failed": {"zh": "失败 ✖", "en": "Failed ✖"},
         "stopped": {"zh": "已停止", "en": "Stopped"},
@@ -463,7 +542,7 @@ class App(ctk.CTk):
         ctk.CTkButton(buttons, text="Save" if is_english else "保存", width=86, command=save_directory).pack(side="left", padx=4)
 
     def _font(self, size=13, weight="normal"):
-        return ctk.CTkFont(family=UI_FONT_FAMILY, size=size, weight=weight)
+        return ctk.CTkFont(family=self._font_family, size=size, weight=weight)
 
     def _c(self, key: str) -> str:
         return THEMES[self._theme][key]
@@ -607,9 +686,7 @@ class App(ctk.CTk):
         title_actions.pack(side="right")
         self._btn_import = ctk.CTkButton(title_actions, text=self._t("import_file"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_import_file)
         self._btn_download_example = ctk.CTkButton(title_actions, text=self._t("download_example"), width=72, height=26, font=self._font(size=12), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("muted"), command=self._on_download_example)
-        self._btn_sentence_pause = ctk.CTkButton(title_actions, text=self._t("sentence_pause_action"), width=86, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_sentence_pause)
         self._btn_prepare_lines = ctk.CTkButton(title_actions, text=self._t("prepare_lines"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_prepare_lines)
-        self._btn_dub_pages = ctk.CTkButton(title_actions, text=self._t("page_dub"), width=92, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF", command=self._on_dub_pages, state="disabled")
         self._char_count = ctk.CTkLabel(title_actions, text=self._t("count", count=0), text_color=self._c("muted"), font=self._font(size=12))
         self._char_count.pack(side="left", padx=(0, 4))
 
@@ -638,8 +715,30 @@ class App(ctk.CTk):
         self._helper_label = ctk.CTkLabel(composer, text=self._t(f"helper_{self._workflow_mode}"), text_color=self._c("muted"), anchor="w", justify="left", wraplength=520, font=self._font(size=12))
         self._helper_label.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 14))
 
-        deck = ctk.CTkScrollableFrame(workspace, width=375, corner_radius=20, fg_color=self._c("card"), border_width=1, border_color=self._c("border"))
-        deck.grid(row=0, column=1, sticky="ns")
+        # CTkScrollableFrame is backed by a native Canvas on Windows. Keeping its
+        # scrolling surface square prevents Canvas redraw trails around rounded borders.
+        deck_shell = ctk.CTkFrame(
+            workspace,
+            width=375,
+            corner_radius=16,
+            fg_color=self._c("card"),
+            border_width=1,
+            border_color=self._c("border"),
+        )
+        deck_shell.grid(row=0, column=1, sticky="nsew")
+        deck_shell.grid_columnconfigure(0, weight=1)
+        deck_shell.grid_rowconfigure(0, weight=1)
+        deck = ctk.CTkScrollableFrame(
+            deck_shell,
+            width=373,
+            corner_radius=0,
+            fg_color=self._c("card"),
+            border_width=0,
+            scrollbar_fg_color=self._c("card"),
+            scrollbar_button_color=self._c("border"),
+            scrollbar_button_hover_color=self._c("card_raised"),
+        )
+        deck.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         deck.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
@@ -701,28 +800,97 @@ class App(ctk.CTk):
         self._btn_reload_voices.grid(row=0, column=1, padx=(8, 0))
         ctk.CTkButton(voice_details, text=self._t("restore"), width=118, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._restore_default_settings).grid(row=0, column=2, padx=(8, 0))
 
-        # 时间轴 JSON + 试听高亮（主界面常驻选项）
-        timeline_row = ctk.CTkFrame(deck, fg_color="transparent")
-        timeline_row.grid(row=4, column=0, sticky="ew", padx=18, pady=(2, 4))
+        # 当前模式的音频设置统一放在右侧，避免顶部内容操作互相挤压。
+        mode_settings = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"), border_width=1, border_color=self._c("border"))
+        mode_settings.grid(row=4, column=0, sticky="ew", padx=18, pady=(4, 6))
+        mode_settings.grid_columnconfigure(0, weight=1)
+        self._mode_settings_title = ctk.CTkLabel(mode_settings, text="", text_color=self._c("text"), anchor="w", font=self._font(size=14, weight="bold"))
+        self._mode_settings_title.grid(row=0, column=0, sticky="w", padx=14, pady=(11, 0))
+        self._mode_settings_hint = ctk.CTkLabel(mode_settings, text="", text_color=self._c("muted"), anchor="w", justify="left", wraplength=315, font=self._font(size=11))
+        self._mode_settings_hint.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 7))
+
+        pause_row = ctk.CTkFrame(mode_settings, fg_color="transparent")
+        pause_row.grid(row=2, column=0, sticky="ew", padx=14)
+        pause_row.grid_columnconfigure(0, weight=1)
+        self._sentence_pause_check = ctk.CTkCheckBox(
+            pause_row,
+            text=self._t("sentence_pause_enable"),
+            variable=tk.BooleanVar(value=self._sentence_pause_enabled),
+            command=self._toggle_sentence_pause,
+            font=self._font(size=12, weight="bold"),
+            text_color=self._c("text"),
+            border_color=self._c("border"),
+            hover_color=self._c("card_raised"),
+            fg_color=self._c("primary"),
+            checkbox_width=20, checkbox_height=20, border_width=2,
+        )
+        self._sentence_pause_check.grid(row=0, column=0, sticky="w")
+        self._pause_var = tk.StringVar(value=str(self._sentence_pause_ms))
+        duration_row = ctk.CTkFrame(pause_row, fg_color="transparent")
+        duration_row.grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ctk.CTkLabel(duration_row, text=self._t("pause_duration"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(0, 8))
+        self._pause_entry = ctk.CTkEntry(duration_row, textvariable=self._pause_var, width=82, height=30, justify="right", fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
+        self._pause_entry.pack(side="left")
+        self._pause_entry.bind("<FocusOut>", self._on_pause_changed)
+        self._pause_entry.bind("<Return>", self._on_pause_changed)
+        ctk.CTkLabel(duration_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(6, 0))
+        self._punctuation_label = ctk.CTkLabel(pause_row, text=self._t("pause_punctuation"), text_color=self._c("muted"), anchor="w", font=self._font(size=11, weight="bold"))
+        self._punctuation_label.grid(row=2, column=0, sticky="w", pady=(9, 3))
+        self._punctuation_frame = ctk.CTkFrame(pause_row, fg_color=self._c("field"), corner_radius=8, border_width=1, border_color=self._c("border"))
+        self._punctuation_frame.grid(row=3, column=0, sticky="ew")
+        for column in range(2):
+            self._punctuation_frame.grid_columnconfigure(column, weight=1, uniform="punctuation")
+        punctuation_defs = (
+            ("comma", ",", {"，", ","}),
+            ("period", "。", {"。", "."}),
+            ("exclamation", "!", {"！", "!"}),
+            ("question", "?", {"？", "?"}),
+            ("semicolon", ";", {"；", ";"}),
+        )
+        for index, (key, mark, marks) in enumerate(punctuation_defs):
+            var = tk.BooleanVar(value=bool(marks & self._sentence_pause_marks))
+            label = f"{self._t('punctuation_' + key)}  {mark}"
+            check = ctk.CTkCheckBox(
+                self._punctuation_frame, text=label, variable=var,
+                command=self._on_punctuation_changed, font=self._font(size=12),
+                text_color=self._c("text"), border_color=self._c("border"),
+                hover_color=self._c("card_raised"), fg_color=self._c("primary"),
+                checkbox_width=20, checkbox_height=20, border_width=2,
+            )
+            row, column = divmod(index, 2)
+            check.grid(row=row, column=column, sticky="w", padx=(12, 8), pady=(8 if row == 0 else 4, 8 if row == 2 else 4))
+            self._punctuation_checks[key] = (var, marks, check)
+        self._set_sentence_pause_controls_enabled(self._sentence_pause_enabled)
+
+        self._line_pause_section = ctk.CTkFrame(mode_settings, fg_color=self._c("field"), corner_radius=8, border_width=1, border_color=self._c("border"))
+        self._line_pause_section.grid(row=3, column=0, sticky="ew", padx=14, pady=(9, 4))
+        self._line_pause_section.grid_columnconfigure(0, weight=1)
+        self._line_pause_check = ctk.CTkCheckBox(self._line_pause_section, text=self._t("line_pause_enable"), variable=tk.BooleanVar(value=self._line_pause_enabled), command=self._toggle_line_pause, font=self._font(size=11, weight="bold"), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
+        self._line_pause_check.grid(row=0, column=0, sticky="w", padx=10, pady=(7, 0))
+        self._line_pause_var = tk.StringVar(value=str(self._line_pause_ms))
+        line_duration_row = ctk.CTkFrame(self._line_pause_section, fg_color="transparent")
+        line_duration_row.grid(row=1, column=0, sticky="w", padx=10, pady=(4, 7))
+        ctk.CTkLabel(line_duration_row, text=self._t("pause_duration"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(0, 8))
+        self._line_pause_entry = ctk.CTkEntry(line_duration_row, textvariable=self._line_pause_var, width=82, height=30, justify="right", fg_color=self._c("surface"), border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
+        self._line_pause_entry.pack(side="left")
+        self._line_pause_entry.bind("<FocusOut>", self._on_line_pause_changed)
+        self._line_pause_entry.bind("<Return>", self._on_line_pause_changed)
+        ctk.CTkLabel(line_duration_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(6, 0))
+        self._set_line_pause_controls_enabled(self._line_pause_enabled)
+
+        timeline_row = ctk.CTkFrame(mode_settings, fg_color="transparent")
+        timeline_row.grid(row=4, column=0, sticky="ew", padx=14)
         self._timeline_var = tk.BooleanVar(value=self._timeline_enabled)
-        ctk.CTkCheckBox(timeline_row, text=self._t("timeline"), variable=self._timeline_var, command=self._toggle_timeline, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary")).pack(side="left")
+        self._timeline_check = ctk.CTkCheckBox(timeline_row, text=self._t("timeline"), variable=self._timeline_var, command=self._toggle_timeline, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
+        self._timeline_check.pack(side="left")
         ctk.CTkButton(timeline_row, text=" ? ", width=30, height=24, font=self._font(size=12, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._show_timeline_help).pack(side="left", padx=(6, 0))
 
-        output_row = ctk.CTkFrame(deck, fg_color="transparent")
-        output_row.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 4))
-        output_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(output_row, text=self._t("sentence_pause"), text_color=self._c("muted"), font=self._font(size=11, weight="bold")).grid(row=0, column=0, sticky="w")
-        self._pause_var = tk.StringVar(value=str(self._sentence_pause_ms))
-        pause_entry = ctk.CTkEntry(output_row, textvariable=self._pause_var, width=72, height=28, justify="right", fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
-        pause_entry.grid(row=0, column=1, sticky="e", padx=(8, 4))
-        pause_entry.bind("<FocusOut>", self._on_pause_changed)
-        pause_entry.bind("<Return>", self._on_pause_changed)
-        ctk.CTkLabel(output_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=2, sticky="e")
         self._srt_var = tk.BooleanVar(value=self._srt_enabled)
-        ctk.CTkCheckBox(output_row, text=self._t("srt_subtitles"), variable=self._srt_var, command=self._toggle_srt, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary")).grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        self._srt_check = ctk.CTkCheckBox(mode_settings, text=self._t("srt_subtitles"), variable=self._srt_var, command=self._toggle_srt, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
+        self._srt_check.grid(row=5, column=0, sticky="w", padx=14, pady=(4, 10))
 
         parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
-        parameters.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 5))
+        parameters.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 5))
         for column in range(3):
             parameters.grid_columnconfigure(column, weight=1, uniform="voice_control")
         self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
@@ -733,26 +901,30 @@ class App(ctk.CTk):
         self._add_slider_card(parameters, 2, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch)
 
         status_row = ctk.CTkFrame(deck, fg_color="transparent")
-        status_row.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 3))
+        status_row.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 3))
         status_row.grid_columnconfigure(0, weight=1)
         self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=self._font(size=12, weight="bold"))
         self._status_label.grid(row=0, column=0, sticky="w")
         self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, font=self._font(size=11), fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
         self._btn_stop.grid(row=0, column=1, sticky="e")
         self._progress = ctk.CTkProgressBar(deck, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
-        self._progress.grid(row=8, column=0, sticky="ew", padx=18, pady=(0, 5))
+        self._progress.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 5))
         self._progress.set(0)
 
         actions = ctk.CTkFrame(deck, fg_color="transparent")
-        actions.grid(row=9, column=0, sticky="ew", padx=18, pady=(0, 9))
+        actions.grid(row=8, column=0, sticky="ew", padx=18, pady=(0, 9))
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
         self._btn_generate = ctk.CTkButton(actions, text=self._t("generate"), command=self._on_generate, height=36, font=self._font(size=14, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
         self._btn_generate.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self._btn_dub_pages = ctk.CTkButton(actions, text=self._t("page_dub"), command=self._on_dub_pages, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"))
+        self._btn_dub_pages.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         self._btn_play = ctk.CTkButton(actions, text=self._t("play"), command=self._on_play, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
-        self._btn_play.grid(row=1, column=0, sticky="ew", padx=(0, 4))
+        self._btn_play.grid(row=2, column=0, sticky="ew", padx=(0, 4))
         self._btn_save = ctk.CTkButton(actions, text=self._t("save"), command=self._on_save, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"))
-        self._btn_save.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+        self._btn_save.grid(row=2, column=1, sticky="ew", padx=(4, 0))
+        self._btn_result_preview = ctk.CTkButton(actions, text=self._t("result_preview"), command=self._open_result_preview, height=30, font=self._font(size=12, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"))
+        self._btn_result_preview.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self._configure_highlight_tag()
         self._sync_generated_status()
         self._update_generated_buttons()
@@ -888,6 +1060,8 @@ class App(ctk.CTk):
             self._on_task_done(item[1], item[2])
         elif kind == "batch_done":
             self._on_batch_done(item[1])
+        elif kind == "result_row_done":
+            self._on_result_row_done(item[1], item[2])
 
     # ============================================================ 网络
 
@@ -1142,11 +1316,8 @@ class App(ctk.CTk):
             return
         self._btn_import.pack_forget()
         self._btn_download_example.pack_forget()
-        self._btn_sentence_pause.pack_forget()
         self._btn_prepare_lines.pack_forget()
-        self._btn_dub_pages.pack_forget()
-        self._btn_sentence_pause.configure(text=self._t("sentence_pause_action"))
-        self._btn_sentence_pause.pack(side="left", padx=(4, 0))
+        self._btn_dub_pages.grid_remove()
         if self._workflow_mode in ("page", "line"):
             self._btn_download_example.pack(side="left", padx=(4, 0))
             self._btn_import.pack(side="left", padx=(4, 0))
@@ -1158,14 +1329,9 @@ class App(ctk.CTk):
             self._btn_dub_pages.configure(
                 text=self._t("line_dub" if self._workflow_mode == "line" else "page_dub")
             )
-            self._btn_dub_pages.pack(side="left", padx=(4, 0))
-        self._helper_label.configure(
-            text=(
-                self._t(f"helper_{self._workflow_mode}")
-                + "\n"
-                + self._t("pause_directive_help")
-            )
-        )
+            if self._pages:
+                self._btn_dub_pages.grid()
+        self._helper_label.configure(text=self._t(f"helper_{self._workflow_mode}"))
         self._btn_generate.configure(
             text=self._t(
                 "generate_line" if self._workflow_mode == "line" and self._pages
@@ -1174,6 +1340,23 @@ class App(ctk.CTk):
             )
         )
         self._update_page_bar()
+        self._update_mode_settings_ui()
+
+    def _update_mode_settings_ui(self):
+        if self._mode_settings_title is None:
+            return
+        mode = self._workflow_mode
+        self._mode_settings_title.configure(text=self._t(f"mode_settings_{mode}"))
+        self._mode_settings_hint.configure(text=self._t(f"mode_settings_hint_{mode}"))
+        if self._line_pause_section is not None:
+            if mode == "line":
+                self._line_pause_section.grid()
+            else:
+                self._line_pause_section.grid_remove()
+        self._sentence_pause_check.configure(text=self._t("sentence_pause_enable"))
+        self._line_pause_check.configure(text=self._t("line_pause_enable"))
+        self._timeline_check.configure(text=self._t("timeline"))
+        self._srt_check.configure(text=self._t("srt_subtitles"))
 
     def _on_prepare_lines(self):
         if self._busy or self._workflow_mode != "line":
@@ -1236,7 +1419,9 @@ class App(ctk.CTk):
             rate=f"{'+' if self._rate_var.get() >= 0 else ''}{self._rate_var.get()}%",
             volume=f"{'+' if self._volume_var.get() >= 0 else ''}{self._volume_var.get()}%",
             pitch=f"{'+' if self._pitch_var.get() >= 0 else ''}{self._pitch_var.get()}Hz",
-            sentence_pause_ms=self._sentence_pause_ms,
+            sentence_pause_ms=self._sentence_pause_ms if self._sentence_pause_enabled else 0,
+            sentence_pause_marks=tuple(sorted(self._sentence_pause_marks)),
+            line_pause_ms=self._line_pause_ms if self._line_pause_enabled and self._workflow_mode == "line" else 0,
         )
 
     def _start_task(self, text, output_path, mode):
@@ -1351,29 +1536,57 @@ class App(ctk.CTk):
         if self._workflow_mode == "line":
             if self._language == "en":
                 return (
-                    "This line generates the first audio file.\n"
-                    "This line generates the second audio file.\n\n"
-                    "Blank lines are ignored, so this becomes the third audio file.\n"
+                    "Today we are testing line-by-line voice generation.\n"
+                    "Each non-empty line becomes a separate audio file.\n"
+                    "This line contains a comma, so you can test sentence pauses.\n"
+                    "This line contains an exclamation mark!\n"
+                    "This line contains a question mark?\n"
+                    "This line contains a semicolon; select multiple punctuation types.\n"
+                    "One line can contain several sentences, too. It will still remain one audio item.\n"
+                    "Enable line-end pause to add silence after every generated line.\n\n"
+                    "Blank lines are ignored during batch generation.\n"
+                    "Use subtitles and the result viewer to review each generated item.\n"
+                    "The final line confirms that the complete batch was generated.\n"
                 )
             return (
-                "这一行会生成第一个音频。\n"
-                "这一行会生成第二个音频。\n\n"
-                "空行会自动忽略，所以这一行会生成第三个音频。\n"
+                "今天我们来测试逐行配音功能。\n"
+                "每一行非空文本都会单独生成一个音频文件。\n"
+                "这一行包含逗号，方便测试句间停顿。\n"
+                "这一行包含感叹号！\n"
+                "这一行包含问号？\n"
+                "这一行包含分号；可以测试多种标点的复选效果。\n"
+                "一行也可以包含多个句子。它仍然只对应一个音频。\n"
+                "开启行末停顿后，每个音频末尾都会增加静音。\n\n"
+                "空行会在批量生成时自动跳过。\n"
+                "开启字幕后，可以在结果窗口查看每条字幕的时间轴。\n"
+                "最后一行用于确认整批音频都已完整生成。\n"
             )
         if self._language == "en":
             return (
-                "This is page one. Everything in this paragraph becomes one audio file.\n\n"
+                "This is page one. It contains several short sentences for pause and subtitle testing.\n"
+                "The page marker below is used only for splitting and is never spoken.\n\n"
                 "[PAGE]\n"
-                "This is page two. You can write multiple sentences here; the marker is not spoken.\n"
+                "This is page two. It includes a comma, an exclamation mark, and a question mark!\n"
+                "You can select any combination of punctuation types in the settings.\n\n"
                 "[PAGE]\n"
-                "This is page three. Import the file, review each page, then dub all pages.\n"
+                "This is page three. Generate the audio, open the result viewer, and edit the text.\n"
+                "After editing, regenerate this page and compare the updated subtitle timing.\n\n"
+                "[PAGE]\n"
+                "This is page four. Page-by-page generation creates one independent audio file per page.\n"
+                "You can review the batch and save the completed files when generation finishes.\n"
             )
         return (
-            "这是第一页。这一段内容会生成一个音频。\n"
+            "这是第一页。这里有多句短旁白，适合测试句间停顿和字幕时间轴。\n"
+            "下面的分页标记只用于拆分，不会被朗读。\n\n"
             "[分页]\n"
-            "这是第二页。同一页可以写多个句子，标记不会被朗读。\n"
+            "这是第二页。这里包含逗号，也包含感叹号！还包含问号？\n"
+            "你可以在右侧复选需要处理的标点类型。\n\n"
             "[分页]\n"
-            "这是第三页。导入后可以逐页检查和修改，再点击逐页配音。\n"
+            "这是第三页。生成后可以打开结果窗口试听、查看字幕并修改文本。\n"
+            "修改完成后重新生成，可以检查新的字幕时间轴。\n\n"
+            "[分页]\n"
+            "这是第四页。逐页配音会为每一页生成一个独立音频。\n"
+            "全部生成完成后，可以逐项检查并保存批量结果。\n"
         )
 
     def _on_download_example(self):
@@ -1489,6 +1702,7 @@ class App(ctk.CTk):
             self._page_bar.grid_remove()
             if self._btn_dub_pages is not None:
                 self._btn_dub_pages.configure(state="disabled")
+                self._btn_dub_pages.grid_remove()
             return
         self._page_bar.grid()
         total = len(self._pages)
@@ -1501,6 +1715,7 @@ class App(ctk.CTk):
         self._btn_next_page.configure(state="normal" if idle and self._page_index < total - 1 else "disabled")
         if self._btn_dub_pages is not None:
             self._btn_dub_pages.configure(state="normal" if idle else "disabled")
+            self._btn_dub_pages.grid()
         self._note_entry.configure(state="normal" if idle else "disabled")
 
     def _output_path_for_current(self):
@@ -1713,6 +1928,356 @@ class App(ctk.CTk):
                 self._highlight_running = True
                 self.after(150, self._tick_highlight)
 
+    def _open_result_preview_legacy(self):
+        """Open a batch-aware review window for generated audio and subtitles."""
+        if self._generated_pages:
+            entries = sorted(self._generated_pages.values(), key=lambda entry: entry.get("page", entry.get("index", 0)))
+        elif self._generated_path and os.path.exists(self._generated_path):
+            entries = [{
+                "page": 1,
+                "title": "",
+                "text": self._generated_text or self._textbox.get("1.0", "end-1c"),
+                "audio": self._generated_path,
+                "timeline": self._generated_timeline,
+            }]
+        else:
+            messagebox.showinfo(APP_NAME, self._t("no_audio"))
+            return
+
+        current_page = self._page_index + 1
+        current_index = next((index for index, entry in enumerate(entries) if entry.get("page") == current_page), 0)
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("result_title"))
+        dialog.geometry("1020x700")
+        dialog.minsize(840, 570)
+        dialog.transient(self)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_columnconfigure(1, weight=1)
+        dialog.grid_rowconfigure(2, weight=1)
+
+        ctk.CTkLabel(dialog, text=self._t("result_title"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=22, pady=(18, 4))
+        audio_bar = ctk.CTkFrame(dialog, corner_radius=10, fg_color=self._c("surface_alt"), border_width=1, border_color=self._c("border"))
+        audio_bar.grid(row=1, column=0, columnspan=2, sticky="ew", padx=22, pady=(4, 10))
+        audio_bar.grid_columnconfigure(3, weight=1)
+        current_label = ctk.CTkLabel(audio_bar, text="", text_color=self._c("accent"), font=self._font(size=12, weight="bold"))
+        current_label.grid(row=0, column=1, padx=(5, 10), pady=7)
+        filename_label = ctk.CTkLabel(audio_bar, text="", text_color=self._c("muted"), anchor="w", font=self._font(size=11))
+        filename_label.grid(row=0, column=3, sticky="w", padx=(0, 8), pady=7)
+        current_mode_label = self._t("result_view_current")
+        all_mode_label = self._t("result_view_all")
+        subtitle_mode = tk.StringVar(value=current_mode_label)
+        subtitle_switch = ctk.CTkSegmentedButton(
+            audio_bar,
+            values=[self._t("result_view_current"), self._t("result_view_all")],
+            variable=subtitle_mode,
+            height=28,
+            font=self._font(size=11, weight="bold"),
+            fg_color=self._c("field"),
+            selected_color=self._c("primary"),
+            selected_hover_color=self._c("primary_hover"),
+            unselected_color=self._c("field"),
+            unselected_hover_color=self._c("card_raised"),
+            text_color=self._c("text"),
+        )
+        subtitle_switch.grid(row=0, column=4, padx=5, pady=7)
+
+        text_frame = ctk.CTkFrame(dialog, corner_radius=10, fg_color=self._c("surface_alt"), border_width=1, border_color=self._c("border"))
+        text_frame.grid(row=2, column=0, sticky="nsew", padx=(22, 7), pady=(0, 12))
+        text_frame.grid_rowconfigure(1, weight=1)
+        text_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(text_frame, text=self._t("result_text"), text_color=self._c("text"), font=self._font(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
+        text_editor = ctk.CTkTextbox(text_frame, wrap="word", fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=13))
+        text_editor.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+
+        subtitle_frame = ctk.CTkFrame(dialog, corner_radius=10, fg_color=self._c("surface_alt"), border_width=1, border_color=self._c("border"))
+        subtitle_frame.grid(row=2, column=1, sticky="nsew", padx=(7, 22), pady=(0, 12))
+        subtitle_frame.grid_rowconfigure(1, weight=1)
+        subtitle_frame.grid_columnconfigure(0, weight=1)
+        subtitle_heading = ctk.CTkLabel(subtitle_frame, text=self._t("result_subtitles"), text_color=self._c("text"), font=self._font(size=13, weight="bold"))
+        subtitle_heading.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
+        subtitle_view = ctk.CTkTextbox(subtitle_frame, wrap="none", fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
+        subtitle_view.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+
+        action_bar = ctk.CTkFrame(dialog, fg_color="transparent")
+        action_bar.grid(row=3, column=0, columnspan=2, sticky="ew", padx=22, pady=(0, 16))
+        action_bar.grid_columnconfigure(1, weight=1)
+        previous_button = ctk.CTkButton(action_bar, text=self._t("result_prev"), width=92, height=34, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("accent"), text_color=self._c("accent"), text_color_disabled=self._c("muted"))
+        previous_button.grid(row=0, column=0, sticky="w")
+        next_button = ctk.CTkButton(action_bar, text=self._t("result_next"), width=92, height=34, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("accent"), text_color=self._c("accent"), text_color_disabled=self._c("muted"))
+        next_button.grid(row=0, column=2, sticky="w", padx=(8, 0))
+        ctk.CTkButton(action_bar, text=self._t("result_close"), width=90, height=34, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("muted"), text_color=self._c("text"), command=dialog.destroy).grid(row=0, column=3, padx=(16, 5))
+
+        def entry_subtitles(entry):
+            timeline = entry.get("timeline")
+            return timeline_to_srt(timeline) if timeline else self._t("result_no_subtitles")
+
+        def all_subtitles():
+            blocks = []
+            for number, entry in enumerate(entries, start=1):
+                heading = self._t("result_all_heading", number=number)
+                title = (entry.get("title") or "").strip()
+                blocks.append(f"{heading}{' · ' + title if title else ''}\n{entry_subtitles(entry)}")
+            return "\n\n".join(blocks)
+
+        def refresh_subtitles():
+            subtitle_view.configure(state="normal")
+            subtitle_view.delete("1.0", "end")
+            if subtitle_mode.get() == all_mode_label:
+                subtitle_heading.configure(text=self._t("result_view_all"))
+                subtitle_view.insert("1.0", all_subtitles())
+            else:
+                subtitle_heading.configure(text=self._t("result_subtitles"))
+                subtitle_view.insert("1.0", entry_subtitles(entries[current_index]))
+            subtitle_view.configure(state="disabled")
+
+        def refresh_entry():
+            entry = entries[current_index]
+            total = len(entries)
+            item_key = "result_item_line" if self._batch_mode == "line" else "result_item_page"
+            current_label.configure(text=self._t(item_key, current=current_index + 1, total=total))
+            filename_label.configure(text=os.path.basename(entry.get("audio") or ""))
+            text_editor.delete("1.0", "end")
+            text_editor.insert("1.0", entry.get("text", ""))
+            previous_button.configure(state="normal" if current_index > 0 else "disabled")
+            next_button.configure(state="normal" if current_index < total - 1 else "disabled")
+            refresh_subtitles()
+
+        def change_entry(step):
+            nonlocal current_index
+            next_index = max(0, min(len(entries) - 1, current_index + step))
+            if next_index != current_index:
+                current_index = next_index
+                refresh_entry()
+
+        def preview_current():
+            audio = entries[current_index].get("audio")
+            if audio and os.path.exists(audio):
+                self._stop_playback()
+                self._play_audio(audio)
+
+        def apply_edits():
+            edited = text_editor.get("1.0", "end-1c").strip()
+            if not edited:
+                messagebox.showwarning(APP_NAME, self._t("empty"), parent=dialog)
+                return
+            entry = entries[current_index]
+            if self._pages:
+                target_index = max(0, min(len(self._pages) - 1, int(entry.get("page", 1)) - 1))
+                self._sync_page_from_ui()
+                self._pages[target_index].text = edited
+                self._page_index = target_index
+                self._load_page_into_ui(target_index)
+            else:
+                self._replace_textbox(edited)
+            dialog.destroy()
+            self._on_generate()
+
+        previous_button.configure(command=lambda: change_entry(-1))
+        next_button.configure(command=lambda: change_entry(1))
+        subtitle_switch.configure(command=lambda _value: refresh_subtitles())
+        ctk.CTkButton(audio_bar, text=self._t("play"), width=76, height=28, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=preview_current).grid(row=0, column=5, padx=5, pady=7)
+        ctk.CTkButton(audio_bar, text=self._t("save"), width=88, height=28, fg_color=self._c("star"), hover_color=self._c("star_hover"), text_color=self._c("warning"), command=self._on_save).grid(row=0, column=6, padx=(0, 10), pady=7)
+        ctk.CTkButton(action_bar, text=self._t("result_apply"), width=170, height=32, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=apply_edits).grid(row=0, column=4, sticky="e")
+        refresh_entry()
+
+    def _open_result_preview(self):
+        if self._generated_pages:
+            entries = sorted(self._generated_pages.values(), key=lambda e: e.get("page", 0))
+        elif self._generated_path and os.path.exists(self._generated_path):
+            entries = [{"page": 1, "text": self._generated_text or self._textbox.get("1.0", "end-1c"), "audio": self._generated_path, "timeline": self._generated_timeline}]
+        else:
+            messagebox.showinfo(APP_NAME, self._t("no_audio"))
+            return
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("result_title"))
+        dialog.geometry("1260x760")
+        dialog.minsize(960, 580)
+        dialog.transient(self)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(2, weight=1)
+        ctk.CTkLabel(dialog, text=self._t("result_title"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=20, pady=(16, 5))
+        toolbar = ctk.CTkFrame(dialog, fg_color=self._c("surface_alt"), corner_radius=10, border_width=1, border_color=self._c("border"))
+        toolbar.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
+        toolbar.grid_columnconfigure(2, weight=1)
+        current_label = self._t("result_view_current")
+        all_label = self._t("result_view_all")
+        mode = tk.StringVar(value=current_label)
+        switch = ctk.CTkSegmentedButton(toolbar, values=[current_label, all_label], variable=mode, height=30, font=self._font(size=11, weight="bold"), fg_color=self._c("field"), selected_color=self._c("primary"), selected_hover_color=self._c("primary_hover"), unselected_color=self._c("field"), unselected_hover_color=self._c("card_raised"), text_color=self._c("text"))
+        switch.grid(row=0, column=0, padx=10, pady=8)
+        summary = ctk.CTkLabel(toolbar, text="", text_color=self._c("muted"), anchor="w")
+        summary.grid(row=0, column=2, sticky="w", padx=10)
+        ctk.CTkButton(toolbar, text=self._t("result_regenerate_all"), width=126, height=30, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=self._on_dub_pages).grid(row=0, column=3, padx=5, pady=8)
+        ctk.CTkButton(toolbar, text=self._t("result_export_zip"), width=118, height=30, fg_color=self._c("star"), hover_color=self._c("star_hover"), text_color=self._c("warning"), command=self._save_pages_bundle).grid(row=0, column=4, padx=(0, 10), pady=8)
+        table = ctk.CTkScrollableFrame(dialog, fg_color=self._c("surface"), corner_radius=10, border_width=1, border_color=self._c("border"))
+        table.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 12))
+        table.grid_columnconfigure(1, weight=4)
+        table.grid_columnconfigure(2, weight=3)
+        for col, label in ((0, self._t("result_table_number")), (1, self._t("result_table_text")), (2, self._t("result_table_timeline")), (3, self._t("result_table_actions"))):
+            ctk.CTkLabel(table, text=label, anchor="w", text_color=self._c("muted"), font=self._font(size=11, weight="bold")).grid(row=0, column=col, sticky="ew", padx=8, pady=(8, 5))
+        row_state = {}
+        active = {"page": None, "after": None}
+        def format_time(seconds):
+            seconds = max(0, int(seconds or 0))
+            return f"{seconds // 60}:{seconds % 60:02d}"
+        def entry_duration(entry):
+            timeline = entry.get("timeline") or {}
+            duration = float(timeline.get("duration", 0) or 0)
+            if duration <= 0:
+                duration = max([float(item.get("end", 0)) for item in timeline.get("sentences", [])] or [0.0])
+                duration += float(timeline.get("duration_padding_ms", 0) or 0) / 1000.0
+            if duration <= 0:
+                try:
+                    if not pygame.mixer.get_init(): pygame.mixer.init()
+                    duration = float(pygame.mixer.Sound(entry.get("audio")).get_length())
+                except Exception:
+                    duration = 1.0
+            return max(0.1, duration)
+        def timeline_text(entry):
+            sentences = (entry.get("timeline") or {}).get("sentences") or []
+            lines = [f"{float(item.get('start', 0)):05.2f} - {float(item.get('end', 0)):05.2f}  {item.get('text', '')}" for item in sentences]
+            timeline = entry.get("timeline") or {}
+            padding = float(timeline.get("duration_padding_ms", 0) or 0) / 1000.0
+            if padding > 0:
+                end = max([float(item.get("end", 0)) for item in sentences] or [0.0])
+                lines.append(f"{end:05.2f} - {end + padding:05.2f}  （行末静音）")
+            return "\n".join(lines) or self._t("result_no_subtitles")
+        def stop_playback():
+            if active["after"]:
+                try:
+                    dialog.after_cancel(active["after"])
+                except Exception:
+                    pass
+            active.update(page=None, after=None)
+            self._stop_playback()
+            for state in row_state.values():
+                state["progress"].set(0)
+                state["elapsed"].configure(text=format_time(0))
+                state["frame"].configure(fg_color=self._c("card"))
+        def play_row(entry, state):
+            audio = entry.get("audio")
+            if not audio or not os.path.exists(audio):
+                return
+            if active["page"] == entry.get("page") and pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                stop_playback()
+                return
+            stop_playback()
+            self._play_audio(audio)
+            active["page"] = entry.get("page")
+            state["frame"].configure(fg_color=self._c("card_raised"))
+            duration = state.get("duration") or entry_duration(entry)
+            state["duration"] = duration
+            state["total"].configure(text=format_time(duration))
+            def tick():
+                if active["page"] != entry.get("page"):
+                    return
+                pos = pygame.mixer.music.get_pos() / 1000.0 if pygame.mixer.get_init() else 0.0
+                state["progress"].set(min(duration, max(0.0, pos)))
+                state["elapsed"].configure(text=format_time(pos))
+                if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                    active["after"] = dialog.after(80, tick)
+                else:
+                    state["progress"].set(duration)
+                    state["elapsed"].configure(text=format_time(duration))
+                    active.update(page=None, after=None)
+                    state["frame"].configure(fg_color=self._c("card"))
+            tick()
+        def seek_row(entry, state, value):
+            duration = state.get("duration") or entry_duration(entry)
+            state["duration"] = duration
+            target = max(0.0, min(float(value), duration))
+            state["elapsed"].configure(text=format_time(target))
+            if active["page"] != entry.get("page"):
+                self._stop_playback()
+                self._play_audio(entry.get("audio"))
+                active["page"] = entry.get("page")
+            try:
+                if pygame.mixer.get_init(): pygame.mixer.music.set_pos(target)
+            except Exception:
+                pass
+        def regenerate(entry, state):
+            text = state["editor"].get("1.0", "end-1c").strip()
+            if not text:
+                messagebox.showwarning(APP_NAME, self._t("empty"), parent=dialog)
+                return
+            if not self._generated_pages:
+                self._replace_textbox(text)
+                self._on_generate()
+                return
+            entry["text"] = normalize_for_tts(clean_text(text))
+            page = int(entry.get("page", 1))
+            if self._pages and page <= len(self._pages):
+                self._pages[page - 1].text = text
+            if self._busy:
+                return
+            self._busy = True
+            self._cancel_event = threading.Event()
+            self._set_busy_ui(True)
+            out_dir = self._batch_dir or tempfile.mkdtemp(prefix="edgetts_review_")
+            self._batch_dir = out_dir
+            output = os.path.join(out_dir, f"{'line' if self._batch_mode == 'line' else 'page'}_{page:03d}.mp3")
+            cfg = self._build_cfg()
+            def worker():
+                try:
+                    engine = TTSEngine(on_log=lambda msg: self._ui_q.put(("log", msg)), on_progress=lambda p, w: None, controller=self._make_controller(), cancel_event=self._cancel_event)
+                    result = engine.generate(entry["text"], output, cfg)
+                    result["timeline"] = getattr(engine, "timeline", None)
+                    result["text"] = entry["text"]
+                except Exception as exc:
+                    result = {"status": "error", "error": str(exc)}
+                self._ui_q.put(("result_row_done", page, result))
+            threading.Thread(target=worker, daemon=True).start()
+        def refresh():
+            for child in table.winfo_children():
+                if int(child.grid_info().get("row", 0)) > 0:
+                    child.destroy()
+            row_state.clear()
+            visible = entries if mode.get() == all_label else entries[:1]
+            summary.configure(text=f"{len(entries)} {'条目' if self._language != 'en' else 'items'}")
+            for row_no, entry in enumerate(visible, 1):
+                frame = ctk.CTkFrame(table, fg_color=self._c("card"), corner_radius=8, border_width=1, border_color=self._c("border"))
+                frame.grid(row=row_no, column=0, columnspan=4, sticky="ew", padx=6, pady=4)
+                frame.grid_columnconfigure(1, weight=4)
+                frame.grid_columnconfigure(2, weight=3)
+                ctk.CTkLabel(frame, text=f"{int(entry.get('page', row_no)):03d}", width=55, text_color=self._c("accent"), font=self._font(size=13, weight="bold")).grid(row=0, column=0, sticky="nw", padx=8, pady=10)
+                editor = ctk.CTkTextbox(frame, height=72, wrap="word", fg_color=self._c("field"), border_width=1, border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
+                editor.grid(row=0, column=1, sticky="ew", padx=6, pady=8)
+                editor.insert("1.0", entry.get("text", ""))
+                ctk.CTkLabel(frame, text=timeline_text(entry), justify="left", anchor="nw", wraplength=360, text_color=self._c("muted"), font=self._font(size=11)).grid(row=0, column=2, sticky="new", padx=8, pady=10)
+                actions = ctk.CTkFrame(frame, fg_color="transparent"); actions.grid(row=0, column=3, sticky="nsew", padx=8, pady=8)
+                duration = entry_duration(entry)
+                timeline_bar = ctk.CTkFrame(actions, fg_color="transparent"); timeline_bar.pack(fill="x", pady=(0, 2)); timeline_bar.grid_columnconfigure(1, weight=1)
+                elapsed = ctk.CTkLabel(timeline_bar, text=format_time(0), width=42, anchor="w", text_color=self._c("success"), font=self._font(size=10, weight="bold")); elapsed.grid(row=0, column=0, sticky="w")
+                progress = ctk.CTkSlider(timeline_bar, from_=0, to=duration, number_of_steps=max(1, int(duration * 10)), height=16, button_length=12, fg_color=self._c("field"), progress_color=self._c("success"), button_color=self._c("success"), button_hover_color=self._c("accent")); progress.grid(row=0, column=1, sticky="ew", padx=4); progress.set(0)
+                total = ctk.CTkLabel(timeline_bar, text=format_time(duration), width=42, anchor="e", text_color=self._c("muted"), font=self._font(size=10)); total.grid(row=0, column=2, sticky="e")
+                buttons = ctk.CTkFrame(actions, fg_color="transparent"); buttons.pack(fill="x")
+                state = {"frame": frame, "editor": editor, "progress": progress, "elapsed": elapsed, "total": total, "duration": duration}; row_state[entry.get("page")] = state
+                progress.configure(command=lambda value, e=entry, s=state: seek_row(e, s, value))
+                ctk.CTkButton(buttons, text=self._t("result_play"), width=72, height=28, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=lambda e=entry, s=state: play_row(e, s)).pack(side="left", padx=(0, 5))
+                ctk.CTkButton(buttons, text=self._t("result_regenerate"), width=88, height=28, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("accent"), text_color=self._c("accent"), command=lambda e=entry, s=state: regenerate(e, s)).pack(side="left")
+                for widget in (frame, editor):
+                    widget.bind("<Enter>", lambda _e, f=frame: f.configure(fg_color=self._c("card_raised")))
+                    widget.bind("<Leave>", lambda _e, f=frame: f.configure(fg_color=self._c("card")))
+        self._result_preview_refresh = refresh
+        switch.configure(command=lambda _value: refresh())
+        ctk.CTkButton(dialog, text=self._t("result_close"), width=100, height=34, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("accent"), text_color=self._c("accent"), command=lambda: (stop_playback(), dialog.destroy())).grid(row=3, column=0, sticky="e", padx=20, pady=(0, 14))
+        refresh()
+
+    def _on_result_row_done(self, page, result):
+        self._busy = False
+        self._set_busy_ui(False)
+        entry = self._generated_pages.get(page)
+        if result.get("status") == "done" and entry:
+            entry["audio"] = result.get("path") or entry.get("audio")
+            entry["timeline"] = result.get("timeline")
+            entry["text"] = result.get("text") or entry.get("text")
+            self._generated_path = entry.get("audio")
+            self._generated_timeline = entry.get("timeline")
+            self.log(f"[结果] 第 {page} 条已重新生成。")
+            if self._result_preview_refresh:
+                self._result_preview_refresh()
+        elif result.get("status") != "done":
+            messagebox.showerror(APP_NAME, f"生成失败：{result.get('error', '未知错误')}")
+
     def _on_save(self):
         if self._generated_pages:
             self._save_pages_bundle()
@@ -1804,6 +2369,48 @@ class App(ctk.CTk):
         self._settings["srt_subtitles"] = self._srt_enabled
         self._save_settings()
 
+    def _toggle_sentence_pause(self):
+        self._sentence_pause_enabled = bool(self._sentence_pause_check.get())
+        self._settings["sentence_pause_enabled"] = self._sentence_pause_enabled
+        self._save_settings()
+        self._set_sentence_pause_controls_enabled(self._sentence_pause_enabled)
+        self._invalidate_generated()
+
+    def _set_sentence_pause_controls_enabled(self, enabled: bool):
+        """Keep dependent duration and punctuation controls in sync with the master switch."""
+        state = "normal" if enabled else "disabled"
+        if self._pause_entry is not None:
+            self._pause_entry.configure(state=state)
+        if self._punctuation_label is not None:
+            self._punctuation_label.configure(text_color=self._c("muted") if enabled else self._c("border"))
+        for item in self._punctuation_checks.values():
+            check = item[2] if len(item) > 2 else item[0]
+            check.configure(state=state)
+
+    def _toggle_line_pause(self):
+        self._line_pause_enabled = bool(self._line_pause_check.get())
+        self._settings["line_pause_enabled"] = self._line_pause_enabled
+        self._save_settings()
+        self._set_line_pause_controls_enabled(self._line_pause_enabled)
+        self._invalidate_generated()
+
+    def _set_line_pause_controls_enabled(self, enabled: bool):
+        """Keep the line-end duration field linked to its master switch."""
+        state = "normal" if enabled else "disabled"
+        if self._line_pause_entry is not None:
+            self._line_pause_entry.configure(state=state)
+
+    def _on_punctuation_changed(self):
+        marks = set()
+        for item in self._punctuation_checks.values():
+            var, values = item[0], item[1]
+            if var.get():
+                marks.update(values)
+        self._sentence_pause_marks = marks
+        self._settings["sentence_pause_marks"] = sorted(marks)
+        self._save_settings()
+        self._invalidate_generated()
+
     def _on_pause_changed(self, _event=None):
         try:
             value = int(self._pause_var.get().strip() or "0")
@@ -1813,6 +2420,18 @@ class App(ctk.CTk):
         self._sentence_pause_ms = value
         self._pause_var.set(str(value))
         self._settings["sentence_pause_ms"] = value
+        self._save_settings()
+        self._invalidate_generated()
+
+    def _on_line_pause_changed(self, _event=None):
+        try:
+            value = int(self._line_pause_var.get().strip() or "0")
+        except ValueError:
+            value = self._line_pause_ms
+        value = max(0, min(10000, value))
+        self._line_pause_ms = value
+        self._line_pause_var.set(str(value))
+        self._settings["line_pause_ms"] = value
         self._save_settings()
         self._invalidate_generated()
 
@@ -1894,7 +2513,7 @@ class App(ctk.CTk):
             text_color=self._c("muted"),
             font=self._font(size=12, weight="bold"),
         ).pack(side="left")
-        custom_var = tk.StringVar(value=str(self._sentence_pause_ms or 300))
+        custom_var = tk.StringVar(value=str(self._sentence_insert_pause_ms))
         entry = ctk.CTkEntry(
             custom,
             textvariable=custom_var,
@@ -2225,6 +2844,9 @@ class App(ctk.CTk):
         state = "disabled" if self._busy else "normal"
         self._btn_play.configure(state=state)
         self._btn_save.configure(state=state)
+        has_result = bool(self._generated_pages or (self._generated_path and os.path.exists(self._generated_path)))
+        if self._btn_result_preview is not None:
+            self._btn_result_preview.configure(state=state if has_result else "disabled")
 
     def _invalidate_generated(self):
         self._generated_path = None
@@ -2244,6 +2866,8 @@ class App(ctk.CTk):
             self._btn_download_example.configure(state="disabled" if busy else "normal")
         if self._btn_sentence_pause is not None:
             self._btn_sentence_pause.configure(state="disabled" if busy else "normal")
+        if self._btn_dub_pages is not None:
+            self._btn_dub_pages.configure(state="disabled" if busy else ("normal" if self._pages else "disabled"))
         if self._btn_prepare_lines is not None:
             self._btn_prepare_lines.configure(state="disabled" if busy else "normal")
         self._update_page_bar()
