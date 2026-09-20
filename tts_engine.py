@@ -223,6 +223,25 @@ def seconds_from_edge_ticks(value: object) -> float:
         return 0.0
 
 
+def audio_duration_seconds(audio_path: str) -> float:
+    """Return the duration reported by the decoder for the final audio file.
+
+    MP3 encoders work in frame-sized chunks, so the physical duration can be
+    slightly different from the requested logical timeline. Keeping this
+    value separately lets the preview follow what the player really plays
+    without changing sentence cue timestamps.
+    """
+    try:
+        import miniaudio
+
+        info = miniaudio.get_file_info(audio_path)
+        if info.sample_rate and info.num_frames:
+            return max(0.0, float(info.num_frames) / float(info.sample_rate))
+        return max(0.0, float(info.duration or 0.0))
+    except Exception:
+        return 0.0
+
+
 def build_sentence_timeline(
     sentence_boundaries: list, voice: str, rate: str
 ) -> dict:
@@ -395,6 +414,7 @@ def insert_sentence_pauses(
 
     result = dict(timeline)
     result["sentences"] = adjusted
+    result["audio_duration"] = round(audio_duration_seconds(audio_path), 4)
     if pause_ms > 0:
         result["sentence_pause_ms"] = pause_ms
     if pause_overrides:
@@ -442,6 +462,7 @@ def append_audio_silence(audio_path: str, timeline: dict, pause_ms: int) -> dict
     result["duration_padding_ms"] = pause_ms
     sentence_end = max([float(item.get("end", 0)) for item in result.get("sentences", [])] or [0.0])
     result["duration"] = round(sentence_end + pause_ms / 1000.0, 4)
+    result["audio_duration"] = round(audio_duration_seconds(audio_path), 4)
     return result
 
 
@@ -746,6 +767,13 @@ class TTSEngine:
                     final_path,
                     self.timeline,
                     cfg.line_pause_ms,
+                )
+            # Store the decoder-measured duration for playback controls. The
+            # sentence timeline remains logical and millisecond-precise while
+            # the preview follows the actual MP3 frame duration.
+            if self.timeline is not None:
+                self.timeline["audio_duration"] = round(
+                    audio_duration_seconds(final_path), 4
                 )
             self.on_progress(100, written)
             return "done"

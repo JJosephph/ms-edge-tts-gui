@@ -51,7 +51,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.5"
+APP_VERSION = "1.5.1"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -2117,11 +2117,19 @@ class App(ctk.CTk):
         row_state = {}
         active = {"page": None, "after": None}
         def format_time(seconds):
-            seconds = max(0, int(seconds or 0))
-            return f"{seconds // 60}:{seconds % 60:02d}"
+            """Format playback time as minutes:seconds.milliseconds."""
+            milliseconds = max(0, int(round(float(seconds or 0) * 1000)))
+            minutes, milliseconds = divmod(milliseconds, 60_000)
+            seconds_part, milliseconds = divmod(milliseconds, 1000)
+            return f"{minutes}:{seconds_part:02d}.{milliseconds:03d}"
         def entry_duration(entry):
             timeline = entry.get("timeline") or {}
-            duration = float(timeline.get("duration", 0) or 0)
+            # Prefer decoder-measured duration so the slider follows the
+            # physical MP3, including frame padding introduced by post-process
+            # encoding. Logical cue times remain available below for subtitles.
+            duration = float(timeline.get("audio_duration", 0) or 0)
+            if duration <= 0:
+                duration = float(timeline.get("duration", 0) or 0)
             if duration <= 0:
                 duration = max([float(item.get("end", 0)) for item in timeline.get("sentences", [])] or [0.0])
                 duration += float(timeline.get("duration_padding_ms", 0) or 0) / 1000.0
@@ -2134,12 +2142,12 @@ class App(ctk.CTk):
             return max(0.1, duration)
         def timeline_text(entry):
             sentences = (entry.get("timeline") or {}).get("sentences") or []
-            lines = [f"{float(item.get('start', 0)):05.2f} - {float(item.get('end', 0)):05.2f}  {item.get('text', '')}" for item in sentences]
+            lines = [f"{float(item.get('start', 0)):07.3f} - {float(item.get('end', 0)):07.3f}  {item.get('text', '')}" for item in sentences]
             timeline = entry.get("timeline") or {}
             padding = float(timeline.get("duration_padding_ms", 0) or 0) / 1000.0
             if padding > 0:
                 end = max([float(item.get("end", 0)) for item in sentences] or [0.0])
-                lines.append(f"{end:05.2f} - {end + padding:05.2f}  （行末静音）")
+                lines.append(f"{end:07.3f} - {end + padding:07.3f}  （行末静音）")
             return "\n".join(lines) or self._t("result_no_subtitles")
         def stop_playback():
             if active["after"]:
@@ -2246,9 +2254,9 @@ class App(ctk.CTk):
                 actions = ctk.CTkFrame(frame, fg_color="transparent"); actions.grid(row=0, column=3, sticky="nsew", padx=8, pady=8)
                 duration = entry_duration(entry)
                 timeline_bar = ctk.CTkFrame(actions, fg_color="transparent"); timeline_bar.pack(fill="x", pady=(0, 2)); timeline_bar.grid_columnconfigure(1, weight=1)
-                elapsed = ctk.CTkLabel(timeline_bar, text=format_time(0), width=42, anchor="w", text_color=self._c("success"), font=self._font(size=10, weight="bold")); elapsed.grid(row=0, column=0, sticky="w")
-                progress = ctk.CTkSlider(timeline_bar, from_=0, to=duration, number_of_steps=max(1, int(duration * 10)), height=16, button_length=12, fg_color=self._c("field"), progress_color=self._c("success"), button_color=self._c("success"), button_hover_color=self._c("accent")); progress.grid(row=0, column=1, sticky="ew", padx=4); progress.set(0)
-                total = ctk.CTkLabel(timeline_bar, text=format_time(duration), width=42, anchor="e", text_color=self._c("muted"), font=self._font(size=10)); total.grid(row=0, column=2, sticky="e")
+                elapsed = ctk.CTkLabel(timeline_bar, text=format_time(0), width=78, anchor="w", text_color=self._c("success"), font=self._font(size=10, weight="bold")); elapsed.grid(row=0, column=0, sticky="w")
+                progress = ctk.CTkSlider(timeline_bar, from_=0, to=duration, number_of_steps=max(1, int(round(duration * 1000))), height=16, button_length=12, fg_color=self._c("field"), progress_color=self._c("success"), button_color=self._c("success"), button_hover_color=self._c("accent")); progress.grid(row=0, column=1, sticky="ew", padx=4); progress.set(0)
+                total = ctk.CTkLabel(timeline_bar, text=format_time(duration), width=78, anchor="e", text_color=self._c("muted"), font=self._font(size=10)); total.grid(row=0, column=2, sticky="e")
                 buttons = ctk.CTkFrame(actions, fg_color="transparent"); buttons.pack(fill="x")
                 state = {"frame": frame, "editor": editor, "progress": progress, "elapsed": elapsed, "total": total, "duration": duration}; row_state[entry.get("page")] = state
                 progress.configure(command=lambda value, e=entry, s=state: seek_row(e, s, value))

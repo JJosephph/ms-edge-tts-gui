@@ -7,6 +7,8 @@ import lameenc
 import miniaudio
 
 from tts_engine import (
+    append_audio_silence,
+    audio_duration_seconds,
     insert_sentence_pause_directives,
     insert_sentence_pauses,
     parse_pause_directives,
@@ -30,6 +32,20 @@ def _write_test_mp3(path: Path, duration_seconds: float = 1.2) -> None:
 
 
 class SubtitleTests(unittest.TestCase):
+    def test_small_line_pause_is_kept_in_logical_timeline_and_reports_audio_duration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.mp3"
+            _write_test_mp3(path, duration_seconds=1.0)
+            timeline = {"sentences": [{"start": 0.0, "end": 1.0, "text": "One."}]}
+
+            adjusted = append_audio_silence(str(path), timeline, 1)
+            measured = audio_duration_seconds(str(path))
+
+        self.assertEqual(adjusted["duration_padding_ms"], 1)
+        self.assertAlmostEqual(adjusted["duration"], 1.001, places=3)
+        self.assertGreater(adjusted["audio_duration"], 1.0)
+        self.assertAlmostEqual(adjusted["audio_duration"], measured, places=3)
+
     def test_formats_sentence_timeline_as_srt(self):
         srt = timeline_to_srt(
             {
