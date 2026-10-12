@@ -51,7 +51,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -2774,7 +2774,7 @@ class App(ctk.CTk):
         is_english = self._language == "en"
         dialog = ctk.CTkToplevel(self)
         dialog.title("⚠ Generation appears stalled" if is_english else "⚠ 生成似乎卡住了")
-        dialog.geometry("540x260")
+        dialog.geometry("540x300")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
@@ -2796,10 +2796,27 @@ class App(ctk.CTk):
         ).pack(padx=30, pady=(0, 14))
 
         result = {"value": "cancel"}
+        dont_remind = tk.BooleanVar(value=False)
 
         def choose(value):
+            if value == "continue" and dont_remind.get():
+                value = "continue_silent"
             result["value"] = value
             dialog.destroy()
+
+        ctk.CTkCheckBox(
+            dialog,
+            text="Don't remind me again (this task)" if is_english else "不再提醒（本次任务）",
+            variable=dont_remind,
+            font=self._font(size=12),
+            text_color="#c0caf5",
+            border_color="#52688f",
+            hover_color="#263B5C",
+            fg_color="#5A8CFF",
+            checkbox_width=20,
+            checkbox_height=20,
+            border_width=2,
+        ).pack(pady=(0, 12))
 
         row = ctk.CTkFrame(dialog, fg_color="transparent")
         row.pack(pady=(6, 20))

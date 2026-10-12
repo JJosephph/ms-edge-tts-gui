@@ -23,10 +23,11 @@ import edge_tts
 
 # ---------------------------------------------------------------- 常量
 STALL_TIMEOUT = 180            # 连续多少秒没有新音频分片 -> 首次提示卡住
-STALL_WAIT_GRACE = 300         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
+STALL_WAIT_GRACE = 600         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
+STALL_SILENT_POLL = 5          # “不再提醒”后，检查取消操作的间隔（秒）
 STALL_DECISION_TIMEOUT = 300   # 卡住后等待用户决定的最长时间（秒）
 CONNECT_TIMEOUT = 10          # edge-tts 建连超时
-RECEIVE_TIMEOUT = 300         # edge-tts 单次接收超时（兜底）
+RECEIVE_TIMEOUT = 1800        # edge-tts 单次接收超时（兜底，不能抢先于界面提示）
 PROBE_TIMEOUT = 6             # 网络探测超时
 MAX_RETRIES = 3               # 最大生成重试次数
 PROGRESS_REPORT_INTERVAL = 0.25
@@ -610,6 +611,7 @@ class TTSEngine:
         self.sentence_boundaries: list = []
         self.timeline: Optional[dict] = None
         self.error_message = ""
+        self._suppress_stall_prompts = False
 
     # ---------------- 对外入口 ----------------
 
@@ -679,7 +681,8 @@ class TTSEngine:
         try:
             iterator = communicate.stream()
             next_chunk = None
-            keep_waiting = False
+            wait_deadline = None
+            silent_waiting = False
             with open(temp_path, "wb") as audio_file:
                 while True:
                     if self.cancel_event.is_set():
@@ -688,7 +691,12 @@ class TTSEngine:
                         raise UserCanceled()
                     if next_chunk is None:
                         next_chunk = asyncio.ensure_future(anext(iterator))
-                    wait_window = STALL_WAIT_GRACE if keep_waiting else STALL_TIMEOUT
+                    if silent_waiting:
+                        wait_window = STALL_SILENT_POLL
+                    elif wait_deadline is not None:
+                        wait_window = max(0.0, wait_deadline - time.perf_counter())
+                    else:
+                        wait_window = STALL_TIMEOUT
                     try:
                         done, _pending = await asyncio.wait(
                             {next_chunk}, timeout=wait_window
@@ -700,12 +708,34 @@ class TTSEngine:
                             chunk = next_chunk.result()
                         except StopAsyncIteration:
                             break
+                        except Exception as exc:
+                            if silent_waiting:
+                                self.on_log(
+                                    f"[警告] 等待期间连接中断：{exc}；已启用不再提醒，正在自动重试。"
+                                )
+                                return "retry"
+                            if wait_deadline is not None:
+                                await self._wait_with_cancel(
+                                    max(0.0, wait_deadline - time.perf_counter())
+                                )
+                                decision = await self._ask_stall(
+                                    "生成等待期间连接中断。"
+                                    "可能是网络不通或代理设置不正确。要重试吗？"
+                                )
+                                if decision == "cancel":
+                                    return "cancel"
+                                if decision == "continue_silent":
+                                    self._suppress_stall_prompts = True
+                                self._safe_unlink(temp_path)
+                                return "retry"
+                            raise
                         next_chunk = None
-                        keep_waiting = False
+                        wait_deadline = None
+                        silent_waiting = False
                     else:
                         # 超时仍未收到新数据
-                        if keep_waiting:
-                            # 用户已选择“继续等待”：不重复弹窗，继续等这个分片
+                        if silent_waiting:
+                            # 用户已选择“不再提醒”：静默等待，同时保留取消响应。
                             continue
                         decision = await self._ask_stall(
                             "生成似乎卡住了：长时间没有收到新的音频数据。"
@@ -718,8 +748,13 @@ class TTSEngine:
                             next_chunk.cancel()
                             self._safe_unlink(temp_path)
                             return "retry"
-                        # 用户选择继续等待：放宽再次提醒的时间，不再反复打扰
-                        keep_waiting = True
+                        if decision == "continue_silent":
+                            self._suppress_stall_prompts = True
+                            silent_waiting = True
+                            wait_deadline = None
+                        else:
+                            # 从用户点击“继续等待”的时刻重新计时。
+                            wait_deadline = time.perf_counter() + STALL_WAIT_GRACE
                         continue
 
                     chunk_type = chunk.get("type")
@@ -793,9 +828,14 @@ class TTSEngine:
             self._safe_unlink(temp_path)
             hint = self._classify_error(exc)
             self.on_log(f"[警告] 生成失败：{exc}（{hint}）")
+            if self._suppress_stall_prompts:
+                self.on_log("[提示] 已启用不再提醒，正在自动重试。")
+                return "retry"
             decision = await self._ask_stall(f"{hint} 是否重试？")
             if decision == "cancel":
                 return "cancel"
+            if decision == "continue_silent":
+                self._suppress_stall_prompts = True
             return "retry"
 
     # ---------------- 工具 ----------------
@@ -803,8 +843,21 @@ class TTSEngine:
     async def _ask_stall(self, message: str) -> str:
         if self.controller is None:
             return "cancel"
-        # ask() 内部是阻塞等待用户决定，可接受（此刻流已停滞）
-        return self.controller.ask(message)
+        if self._suppress_stall_prompts:
+            return "continue_silent"
+        # 让网络事件循环继续运行；否则对话框打开期间底层超时回调会堆积，
+        # 用户点击继续等待后会立即拿到已经超时的旧结果并再次弹窗。
+        return await asyncio.to_thread(self.controller.ask, message)
+
+    async def _wait_with_cancel(self, seconds: float) -> None:
+        deadline = time.perf_counter() + seconds
+        while True:
+            if self.cancel_event.is_set():
+                raise UserCanceled()
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(0.25, remaining))
 
     def _classify_error(self, exc: Exception) -> str:
         text = str(exc).lower()
