@@ -50,11 +50,25 @@ jobs:
           & $iscc "/DMyAppVersion=$env:APP_VERSION" installer\EdgeTTSGui.iss
           Get-ChildItem dist | Select-Object Name, Length
 
+      - name: 提取当前版本更新说明
+        shell: pwsh
+        run: |
+          $version = $env:APP_VERSION
+          $content = Get-Content RELEASE_NOTES.md -Raw
+          $pattern = "(?ms)^## v$([regex]::Escape($version))\s*\r?\n(.*?)(?=^## v|\z)"
+          $match = [regex]::Match($content, $pattern)
+          if ($match.Success) {
+            $body = "## v$version`n`n" + $match.Groups[1].Value.Trim()
+          } else {
+            $body = "Release v$version"
+          }
+          Set-Content -Path release_body.md -Value $body -Encoding utf8
+
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release_body.md
           files: |
             dist/EdgeTTSGui/EdgeTTSGui.exe
             dist/EdgeTTSGui-Portable.exe
             dist/EdgeTTSGui-Setup.exe
-          generate_release_notes: true

@@ -41,6 +41,7 @@ from tts_engine import (
     timeline_to_srt,
 )
 from text_utils import clean_text, default_filename, normalize_for_tts
+from update_checker import ReleaseInfo, UpdateCheckResult, check_for_updates
 from voice_groups import (
     GENDER_ALL,
     GENDER_FEMALE,
@@ -51,7 +52,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.5.3"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -122,6 +123,8 @@ class App(ctk.CTk):
         self._ui_q: "queue.Queue" = queue.Queue()
         self._stall_req_q: "queue.Queue" = queue.Queue()
         self._stall_controller: StallController | None = None
+        self._update_check_running = False
+        self._update_dialog_open = False
         self._cancel_event = threading.Event()
         self._busy = False
         self._settings = self._load_settings()
@@ -219,6 +222,18 @@ class App(ctk.CTk):
         "github_repo": {"zh": "GitHub 仓库", "en": "GitHub"},
         "github_star": {"zh": "GitHub 点赞", "en": "Star on GitHub"},
         "settings_short": {"zh": "设置", "en": "Settings"},
+        "check_updates": {"zh": "检查更新", "en": "Updates"},
+        "update_available_title": {"zh": "发现新版本", "en": "Update Available"},
+        "update_current_title": {"zh": "检查更新", "en": "Check for Updates"},
+        "update_check_failed_title": {"zh": "检查更新失败", "en": "Update Check Failed"},
+        "update_new_version": {"zh": "新版本：v{version}", "en": "New version: v{version}"},
+        "update_current_version": {"zh": "当前版本：v{version}", "en": "Current version: v{version}"},
+        "update_notes": {"zh": "更新内容", "en": "What's new"},
+        "update_open_page": {"zh": "打开发布页", "en": "Open release page"},
+        "update_download": {"zh": "直接下载安装包", "en": "Download installer"},
+        "update_later": {"zh": "稍后", "en": "Later"},
+        "update_up_to_date": {"zh": "当前已是最新版本 v{version}。", "en": "You are running the latest version, v{version}."},
+        "update_empty_notes": {"zh": "此版本未提供更新说明，请打开发布页查看。", "en": "No release notes were provided. Open the release page for details."},
         "repo": {"zh": "GitHub 仓库 ↗", "en": "GitHub Repo ↗"},
         "star": {"zh": "⭐ 去 GitHub 点 Star", "en": "⭐ Star on GitHub"},
         "developer": {"zh": "开发者", "en": "Developer"},
@@ -632,6 +647,7 @@ class App(ctk.CTk):
         ctk.CTkButton(controls, text=self._t("github_repo"), width=92, height=30, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
         ctk.CTkButton(controls, text=self._t("github_star"), width=104, height=30, font=self._font(size=12, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"), command=lambda: webbrowser.open(REPOSITORY_URL)).pack(side="left", padx=2)
         ctk.CTkButton(controls, text=self._t("settings_short"), width=52, height=30, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._show_settings).pack(side="left", padx=(6, 2))
+        ctk.CTkButton(controls, text=self._t("check_updates"), width=78, height=30, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._on_check_updates).pack(side="left", padx=2)
         theme_text = self._t("theme_dark") if self._theme == "dark" else self._t("theme_light")
         ctk.CTkButton(controls, text=theme_text, width=52, height=30, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_theme).pack(side="left", padx=2)
         ctk.CTkButton(controls, text=self._t("language"), width=40, height=30, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), text_color=self._c("text"), command=self._switch_language).pack(side="left", padx=(2, 0))
@@ -983,6 +999,13 @@ class App(ctk.CTk):
     def _start_background_jobs(self):
         threading.Thread(target=self._load_voices, daemon=True).start()
         threading.Thread(target=self._probe_worker, daemon=True).start()
+        if not self._update_check_running:
+            self._update_check_running = True
+            threading.Thread(
+                target=self._update_check_worker,
+                args=(False,),
+                daemon=True,
+            ).start()
         self.after(150, self._poll_ui)
 
     def _load_voices(self):
@@ -1002,6 +1025,21 @@ class App(ctk.CTk):
     def _probe_worker(self):
         result = probe_network()
         self._ui_q.put(("network", result))
+
+    def _update_check_worker(self, manual=False):
+        result = check_for_updates(APP_VERSION)
+        self._ui_q.put(("update_result", result, manual))
+
+    def _on_check_updates(self):
+        if self._update_check_running:
+            return
+        self._update_check_running = True
+        self.log("开始检查更新…" if self._language == "zh" else "Checking for updates…")
+        threading.Thread(
+            target=self._update_check_worker,
+            args=(True,),
+            daemon=True,
+        ).start()
 
     # ============================================================ UI 轮询
 
@@ -1033,6 +1071,8 @@ class App(ctk.CTk):
         elif kind == "voices":
             voices, err = item[1], item[2]
             self._apply_voices(voices, err)
+        elif kind == "update_result":
+            self._apply_update_result(item[1], item[2])
         elif kind == "log":
             self.log(item[1])
         elif kind == "progress":
@@ -1089,6 +1129,116 @@ class App(ctk.CTk):
                 self.log(
                     f"[网络] 不可达（{result.error}）。生成可能很慢或失败，建议检查网络后重试。"
                 )
+
+    # ============================================================ 更新检测
+
+    def _apply_update_result(self, result: UpdateCheckResult, manual: bool):
+        self._update_check_running = False
+        if result.error:
+            if manual:
+                messagebox.showwarning(
+                    self._app_name(),
+                    f"{self._t('update_check_failed_title')}：\n\n{result.error}",
+                )
+            return
+        if result.update_available and result.latest is not None:
+            self._show_update_dialog(result.latest)
+            return
+        if manual:
+            messagebox.showinfo(
+                self._app_name(),
+                self._t("update_up_to_date", version=APP_VERSION),
+            )
+
+    def _show_update_dialog(self, release: ReleaseInfo):
+        if self._update_dialog_open:
+            return
+        self._update_dialog_open = True
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("update_available_title"))
+        dialog.geometry("650x580")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.after(100, dialog.lift)
+
+        def close_dialog():
+            self._update_dialog_open = False
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("update_available_title"),
+            font=self._font(size=20, weight="bold"),
+            text_color=self._c("text"),
+        ).pack(anchor="w", padx=24, pady=(22, 4))
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("update_new_version", version=release.version),
+            font=self._font(size=14, weight="bold"),
+            text_color=self._c("accent"),
+        ).pack(anchor="w", padx=24)
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("update_current_version", version=APP_VERSION),
+            font=self._font(size=12),
+            text_color=self._c("muted"),
+        ).pack(anchor="w", padx=24, pady=(2, 14))
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("update_notes"),
+            font=self._font(size=13, weight="bold"),
+            text_color=self._c("text"),
+        ).pack(anchor="w", padx=24)
+        notes = release.notes or self._t("update_empty_notes")
+        notes_box = ctk.CTkTextbox(
+            dialog,
+            height=330,
+            wrap="word",
+            corner_radius=10,
+            fg_color=self._c("field"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            font=self._font(size=12),
+        )
+        notes_box.pack(fill="both", expand=True, padx=24, pady=(6, 14))
+        notes_box.insert("1.0", notes)
+        notes_box.configure(state="disabled")
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(anchor="e", padx=24, pady=(0, 18))
+        ctk.CTkButton(
+            buttons,
+            text=self._t("update_open_page"),
+            width=112,
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("accent"),
+            command=lambda: webbrowser.open(release.page_url or REPOSITORY_URL),
+        ).pack(side="left", padx=(0, 6))
+        if release.download_url:
+            ctk.CTkButton(
+                buttons,
+                text=self._t("update_download"),
+                width=132,
+                fg_color=self._c("primary"),
+                hover_color=self._c("primary_hover"),
+                text_color="#FFFFFF",
+                command=lambda: webbrowser.open(release.download_url),
+            ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            buttons,
+            text=self._t("update_later"),
+            width=72,
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            text_color=self._c("text"),
+            command=close_dialog,
+        ).pack(side="left")
 
     # ============================================================ 语音
 
@@ -1508,8 +1658,7 @@ class App(ctk.CTk):
             messagebox.showerror(
                 APP_NAME,
                 "生成失败：\n\n"
-                + result.get("error", "未知错误")
-                + "\n\n请检查网络连接或代理设置后重试。",
+                + result.get("error", "未知错误"),
             )
 
     # ============================================================ 按钮动作
@@ -2751,6 +2900,8 @@ class App(ctk.CTk):
             (r"^\[网络\] 不可达，检测到代理 (.*)，可能是网络不通或代理设置不正确。$", r"[Network] Unreachable; proxy detected: \1. Check the connection or proxy configuration."),
             (r"^\[网络\] 不可达（(.*)）。生成可能很慢或失败，建议检查网络后重试。$", r"[Network] Unreachable (\1). Synthesis may be slow or fail; check your network and retry."),
             (r"^\[警告\] 生成失败：(.*)（可能是网络不通或代理设置不正确）$", r"[Warning] Synthesis failed: \1 (network or proxy may be unavailable or misconfigured)"),
+            (r"^等待 ([\d.]+) 秒后重试…$", r"Retrying in \1 seconds…"),
+            (r"^\[警告\] 生成失败：(.*)（微软语音服务拒绝了连接（403）。(.*)）$", r"[Warning] Synthesis failed: \1 (Microsoft speech service rejected the connection with HTTP 403. \2)"),
         ]
         for pattern, replacement in substitutions:
             localized = re.sub(pattern, replacement, message)

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import tts_engine
+from edge_tts import communicate as edge_tts_communicate
 from tts_engine import TTSConfig, TTSEngine
 
 
@@ -19,6 +20,16 @@ class _FailingCommunicate:
             yield None
         await asyncio.sleep(0.02)
         raise RuntimeError("simulated receive timeout")
+
+
+class _ForbiddenCommunicate:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def stream(self):
+        if False:
+            yield None
+        raise RuntimeError("403, message='Invalid response status'")
 
 
 class _RecordingController:
@@ -45,6 +56,34 @@ class _RecordingController:
 
 
 class StallHandlingTests(unittest.TestCase):
+    def test_uses_edge_155_synthesis_endpoint_for_legacy_edge_tts(self):
+        original_url = edge_tts_communicate.WSS_URL
+        try:
+            edge_tts_communicate.WSS_URL = (
+                "wss://speech.platform.bing.com/consumer/speech/synthesize/"
+                "readaloud/edge/v1?TrustedClientToken=legacy"
+            )
+            tts_engine.configure_edge_tts_endpoint()
+            self.assertIn("api.msedgeservices.com", edge_tts_communicate.WSS_URL)
+            self.assertIn("Ocp-Apim-Subscription-Key", edge_tts_communicate.WSS_URL)
+        finally:
+            edge_tts_communicate.WSS_URL = original_url
+
+    def test_service_rejection_does_not_show_stall_prompt(self):
+        controller = _RecordingController("continue")
+        engine = TTSEngine(controller=controller)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.mp3"
+            with patch("tts_engine.edge_tts.Communicate", _ForbiddenCommunicate):
+                outcome = asyncio.run(
+                    engine._stream_once("hello", output, TTSConfig())
+                )
+
+        self.assertEqual(outcome, "error")
+        self.assertEqual(controller.calls, 0)
+        self.assertIn("403", engine.error_message)
+
     def test_continue_waiting_restarts_grace_before_reporting_stream_failure(self):
         controller = _RecordingController("continue", first_delay=0.03)
         engine = TTSEngine(controller=controller)

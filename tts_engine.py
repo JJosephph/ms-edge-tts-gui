@@ -3,7 +3,7 @@
 
 设计要点
 --------
-1. 生成前可选网络探测（speech.platform.bing.com），识别离线 / 代理异常。
+1. 生成前可选网络探测（api.msedgeservices.com 合成 WebSocket），识别离线 / 代理异常。
 2. 流式接收音频分片，若超过 STALL_TIMEOUT 没有新分片，判定为“卡住”，
    通过 StallController 询问界面：重试 / 取消 / 继续等待。
 3. 支持重试与用户取消；错误分类后给出网络 / 代理提示。
@@ -15,11 +15,15 @@ import queue
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 import aiohttp
 import edge_tts
+import edge_tts.communicate as edge_tts_communicate
+from edge_tts.constants import SEC_MS_GEC_VERSION, TRUSTED_CLIENT_TOKEN, WSS_HEADERS
+from edge_tts.drm import DRM
 
 # ---------------------------------------------------------------- 常量
 STALL_TIMEOUT = 180            # 连续多少秒没有新音频分片 -> 首次提示卡住
@@ -30,9 +34,30 @@ CONNECT_TIMEOUT = 10          # edge-tts 建连超时
 RECEIVE_TIMEOUT = 1800        # edge-tts 单次接收超时（兜底，不能抢先于界面提示）
 PROBE_TIMEOUT = 6             # 网络探测超时
 MAX_RETRIES = 3               # 最大生成重试次数
+RETRY_BASE_DELAY = 2.0        # 首次自动重试前等待（秒）
+RETRY_MAX_DELAY = 5.0         # 自动重试等待上限（秒）
 PROGRESS_REPORT_INTERVAL = 0.25
 DEFAULT_DIRECTIVE_PAUSE_MS = 300
 MAX_DIRECTIVE_PAUSE_MS = 10000
+
+NEW_EDGE_TTS_WSS_URL = (
+    "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
+    f"?Ocp-Apim-Subscription-Key={TRUSTED_CLIENT_TOKEN}"
+)
+SERVICE_REJECTION_MESSAGE = (
+    "微软语音服务拒绝了连接（403）。这通常是服务端端点或访问策略变化导致的，"
+    "不是本地网络问题。请稍后重试；如果持续出现，请更新到最新版本。"
+)
+
+
+def configure_edge_tts_endpoint() -> None:
+    """Use Edge 155's synthesis host while keeping the legacy client token."""
+    current_url = getattr(edge_tts_communicate, "WSS_URL", "")
+    if "speech.platform.bing.com" in current_url:
+        edge_tts_communicate.WSS_URL = NEW_EDGE_TTS_WSS_URL
+
+
+configure_edge_tts_endpoint()
 
 PAUSE_DIRECTIVE_PATTERN = re.compile(
     r"\[\s*pause(?:\s*:\s*([^\]]+))?\s*\]",
@@ -468,8 +493,8 @@ def append_audio_silence(audio_path: str, timeline: dict, pause_ms: int) -> dict
 
 
 
-# edge-tts 使用的真实服务地址（用于网络探测，最贴近真实链路）
-PROBE_URL = "https://speech.platform.bing.com/"
+# 微软 Edge 155 使用的真实合成 WebSocket 地址
+PROBE_URL = NEW_EDGE_TTS_WSS_URL
 
 # ---------------------------------------------------------------- 异常
 
@@ -520,20 +545,34 @@ def detect_proxy() -> Optional[str]:
 
 
 async def _probe_async(proxy: Optional[str]) -> ProbeResult:
-    """异步网络探测：对 edge-tts 服务域名发起一次 HTTPS 请求。"""
+    """异步网络探测：与真实合成 WebSocket 完成一次握手后立即关闭。"""
     result = ProbeResult(reachable=False, proxy=proxy)
     timeout = aiohttp.ClientTimeout(
         total=PROBE_TIMEOUT, connect=PROBE_TIMEOUT, sock_connect=PROBE_TIMEOUT
     )
     start = time.perf_counter()
     try:
+        probe_url = (
+            f"{PROBE_URL}&ConnectionId={uuid.uuid4().hex}"
+            f"&Sec-MS-GEC={DRM.generate_sec_ms_gec()}"
+            f"&Sec-MS-GEC-Version={SEC_MS_GEC_VERSION}"
+        )
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(PROBE_URL, proxy=proxy) as resp:
-                _ = resp.status  # 只要在超时内返回（哪怕 4xx/5xx）都算可达
+            async with session.ws_connect(
+                probe_url,
+                compress=15,
+                proxy=proxy,
+                headers=DRM.headers_with_muid(WSS_HEADERS),
+            ):
+                pass
         result.reachable = True
         result.latency_ms = round((time.perf_counter() - start) * 1000, 1)
     except Exception as exc:  # noqa: BLE001 - 探测失败统一视为不可达
-        result.error = str(exc)[:300]
+        status = getattr(exc, "status", None)
+        if status == 403:
+            result.error = "微软语音服务拒绝了连接（403）"
+        else:
+            result.error = str(exc)[:300]
     return result
 
 
@@ -645,7 +684,13 @@ class TTSEngine:
                     "status": "error",
                     "error": "生成多次失败，请检查网络连接或代理设置后重试。",
                 }
-            self.on_log("准备重试…")
+            delay = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * (2 ** (attempts - 1)))
+            self.on_log(f"等待 {delay:g} 秒后重试…")
+            try:
+                await self._wait_with_cancel(delay)
+            except UserCanceled:
+                self.on_log("任务已取消。")
+                return {"status": "canceled"}
 
     async def _stream_once(self, text: str, output_path, cfg: TTSConfig) -> str:
         """执行一次流式生成，返回 'done' | 'cancel' | 'retry'。"""
@@ -709,6 +754,13 @@ class TTSEngine:
                         except StopAsyncIteration:
                             break
                         except Exception as exc:
+                            if self._is_service_rejection(exc):
+                                self.error_message = SERVICE_REJECTION_MESSAGE
+                                self.on_log(
+                                    f"[警告] 生成失败：{exc}"
+                                    f"（{SERVICE_REJECTION_MESSAGE}）"
+                                )
+                                return "error"
                             if silent_waiting:
                                 self.on_log(
                                     f"[警告] 等待期间连接中断：{exc}；已启用不再提醒，正在自动重试。"
@@ -826,6 +878,13 @@ class TTSEngine:
             return "error"
         except Exception as exc:  # noqa: BLE001 - 统一兜底并让用户决定
             self._safe_unlink(temp_path)
+            if self._is_service_rejection(exc):
+                self.error_message = SERVICE_REJECTION_MESSAGE
+                self.on_log(
+                    f"[警告] 生成失败：{exc}"
+                    f"（{SERVICE_REJECTION_MESSAGE}）"
+                )
+                return "error"
             hint = self._classify_error(exc)
             self.on_log(f"[警告] 生成失败：{exc}（{hint}）")
             if self._suppress_stall_prompts:
@@ -860,6 +919,8 @@ class TTSEngine:
             await asyncio.sleep(min(0.25, remaining))
 
     def _classify_error(self, exc: Exception) -> str:
+        if self._is_service_rejection(exc):
+            return SERVICE_REJECTION_MESSAGE
         text = str(exc).lower()
         network_kw = (
             "timeout",
@@ -878,6 +939,24 @@ class TTSEngine:
         if any(kw in text for kw in network_kw):
             return "可能是网络不通或代理设置不正确"
         return "生成过程中出现异常"
+
+    def _is_service_rejection(self, exc: Exception) -> bool:
+        """Recognize an HTTP 403 even when edge-tts wraps it in another error."""
+        seen: set[int] = set()
+        current: Optional[BaseException] = exc
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if getattr(current, "status", None) == 403:
+                return True
+            text = str(current).lower()
+            if "403" in text and (
+                "invalid response status" in text
+                or "forbidden" in text
+                or "wsserverhandshake" in type(current).__name__.lower()
+            ):
+                return True
+            current = current.__cause__
+        return False
 
     @staticmethod
     def _temp_path(output_path) -> str:
