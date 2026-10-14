@@ -56,13 +56,13 @@
 **Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。播放中“试听”按钮会变成醒目的红色「■ 停止播放」，再点一次即可停止，音频播放结束也会自动还原。
-- **三种工作模式**：普通模式直接读取输入框全文；逐页模式按 `[分页]` 标记生成一页一个音频；逐行模式按每个非空行生成一个音频。
+- **三种工作模式**：普通模式直接读取输入框全文；逐页模式按 `[分页]` 标记生成一页一个音频；逐行模式可直接生成带精确行间停顿的全文，也可“按行准备”后为每个非空行导出独立音频。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
 - **时间轴 JSON + 试听高亮**：主界面勾选后，保存/下载时自动打包 ZIP（内含 MP3 与同名 `.timeline.json`，每句起止秒数）；试听时正在朗读的句子会在文章中实时高亮。
 - **结果表格浏览器**：批量结果按行展示文字、句级时间轴、试听和重新生成操作；悬停会高亮对应行，修改后的单行可以直接重新生成并继续导出最终 ZIP。
 - **可拖动播放时间轴**：每行显示已播放秒数/总时长，绿色滑块可拖动跳转；播放进度和行末静音段都包含在总时长中。
-- **独立句间停顿**：用毫秒精确设置每句话之间的静音间隔，不改变人声本身的语速；时间轴和字幕会同步后移。
-- **行末停顿**：逐行模式可在整行音频后追加真实静音；这段时间没有人声但进度继续走，时间轴会标注“行末静音”。
+- **独立句间停顿**：用词级边界定位真实语音末点，再替换原生间隔；时间轴、SRT 和音频同步更新，不改变人声语速。
+- **行末停顿**：逐行模式会精确改写每一行之间的静音，并裁掉最后一行的原生尾静音后写入指定时长，不再受不同声音原生停顿长短影响。
 - **SRT 字幕**：勾选“生成 SRT 字幕”后，每句对应一条字幕，时间严格匹配最终音频，可随 MP3 一起导出。
 - **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
 - **更新检测**：启动时自动检查 GitHub 最新正式版；顶部“检查更新”可手动检查，发现新版本时显示更新内容和下载入口。
@@ -75,10 +75,10 @@
 ### 中文界面预览
 
 <p align="center">
-  <img src="assets/ui-v154-normal.png" alt="v1.5.4 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
+<img src="assets/ui-v160-normal.png" alt="v1.6.0 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
 </p>
 <p align="center">
-  <sub>v1.5.4 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
+<sub>v1.6.0 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
 </p>
 
 ### 亮点功能：时间轴 JSON + 试听逐句高亮
@@ -90,13 +90,13 @@
 - **精准且零额外合成**：MP3 与时间轴在同一次请求中生成，时间轴直接使用微软 TTS 返回的句级边界，**不需要再次合成**，纯本地保存、完全免费、无需 API Key。
 
 <p align="center">
-  <img src="assets/ui-v154-highlight.png" alt="试听逐句高亮：正在朗读的句子在文章中实时点亮" width="900">
+<img src="assets/ui-v160-highlight.png" alt="试听逐句高亮：正在朗读的句子在文章中实时点亮" width="900">
 </p>
 <p align="center">
   <sub>试听逐句高亮：播放时正在朗读的句子会实时点亮，同时“试听”按钮变成红色「■ 停止播放」。</sub>
 </p>
 <p align="center">
-  <img src="assets/ui-v154-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="600">
+<img src="assets/ui-v160-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="600">
 </p>
 
 `.timeline.json` 内容示例：
@@ -134,7 +134,7 @@
 `[分页]` 不会被朗读。没有显式标记时，文本中的空行块也可以作为页面。每页支持备注，备注不会朗读，会写入 `pages.json`。点击「**逐页配音**」后，每页生成一个 MP3，最后可导出 ZIP。
 
 <p align="center">
-  <img src="assets/ui-v154-page.png" alt="v1.5.4 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
+<img src="assets/ui-v160-page.png" alt="v1.6.0 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
 </p>
 <p align="center">
   <sub>逐页模式：左上角切换「逐页模式」，导入 txt / md / docx / pdf 后逐页核对文字与备注，再点击「逐页配音」批量生成。</sub>
@@ -153,7 +153,7 @@
 点击「**逐行配音**」后，软件按行顺序合成，完成后保存为 ZIP，包含 `line_001.mp3`、`line_002.mp3` 等音频以及 `lines.json`。打开「查看结果」后，可切换“当前音频 / 全部字幕”，在同一行编辑文字、查看时间轴、试听、拖动进度和重新生成；全部确认后可直接导出最终 ZIP。逐页和逐行模式都提供「**示例文件**」按钮。
 
 <p align="center">
-  <img src="assets/ui-v154-line.png" alt="v1.5.4 逐行模式：每个非空行生成一个独立音频" width="900">
+<img src="assets/ui-v160-line.png" alt="v1.6.0 逐行模式：每个非空行生成一个独立音频" width="900">
 </p>
 <p align="center">
   <sub>逐行模式：粘贴文本后点击「按行准备」（或直接导入文件），每个非空行对应一个音频，可逐行翻页核对。</sub>
@@ -171,7 +171,7 @@
 - **导出最终 ZIP**：确认无误后点「导出最终 ZIP」，把音频、SRT 字幕和时间轴 JSON 一起打包保存。
 
 <p align="center">
-  <img src="assets/ui-v154-result.png" alt="v1.5.4 查看结果：试听、字幕时间轴、拖动进度与逐行重新生成" width="900">
+<img src="assets/ui-v160-result.png" alt="v1.6.0 查看结果：试听、字幕时间轴、拖动进度与逐行重新生成" width="900">
 </p>
 <p align="center">
   <sub>「查看结果」· 全部字幕视图：编号、字幕文本、时间轴、试听 / 重新生成、可拖动进度条一屏完成校对。</sub>
@@ -179,8 +179,9 @@
 
 ### 句间停顿与字幕
 
-- 在右侧「**默认句间停顿**」输入毫秒数（`0–10000 ms`），设置值会覆盖 Edge TTS 原生句间空隙，最终静音时长按毫秒精确生效，不改变人声语速。
-- 逐行模式开启「**行末停顿**」后，每个独立音频末尾会追加对应毫秒数的真实静音；它不会改变前面的语音速度，播放时进度条会继续经过这段无声区间。
+- 在右侧「**默认句间停顿**」输入毫秒数：支持 `0`，或 `50–10000 ms`。设置值会替换 Edge TTS 原生句间空隙，不改变人声语速。
+- 逐行模式开启「**行末停顿**」后，程序使用微软词级边界定位每行真实语音末点，再按采样点写入指定静音。直接生成全文时控制行与行之间的间隔；按行批量导出时控制每个独立音频的尾部静音。
+- 低于 `50 ms` 的非零停顿不提供：24 kHz MP3 每帧为 48 ms，更短的值无法稳定听辨或验证。需要删除原生停顿时请使用 `0 ms`。静音位置按 PCM 采样点写入，但 MP3 文件总时长仍可能按帧取整。
 - 点击编辑区上方「**句末停顿**」可批量插入停顿指令；也可以手动写入 `[pause:500ms]`、`[pause:1.5s]`、`[pause:weak]`、`[pause:medium]`、`[pause:strong]` 或 `[pause]`。这些指令不会被朗读，单句指令优先于全局默认值。
 - 开启「**生成 SRT 字幕**」后，每句生成一条字幕；字幕时间会包含句间停顿，和最终 MP3 严格对应。
 - 开启「**时间轴 JSON + 试听高亮**」后，可同时导出 `.timeline.json`；批量 ZIP 会按每页或每行保存对应的 MP3、SRT 和时间轴文件。
@@ -213,24 +214,24 @@ The project is designed as a general-purpose open-source tool with three focused
 ## Interface Preview
 
 <p align="center">
-  <img src="assets/ui-v154-normal.png" alt="v1.5.4 interface preview" width="900">
+<img src="assets/ui-v160-normal.png" alt="v1.6.0 interface preview" width="900">
 </p>
 
 <p align="center">
-  <sub>v1.5.4 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
+<sub>v1.6.0 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
 </p>
 
 ## Work Modes
 
 <p align="center">
-  <img src="assets/ui-v154-page.png" alt="v1.5.4 Page mode: one audio file per page" width="900">
+<img src="assets/ui-v160-page.png" alt="v1.6.0 Page mode: one audio file per page" width="900">
 </p>
 <p align="center">
   <sub>Page mode · import txt / md / docx / pdf, verify each page and its note, then dub every page into its own MP3.</sub>
 </p>
 
 <p align="center">
-  <img src="assets/ui-v154-line.png" alt="v1.5.4 Line mode: one audio file per non-empty line" width="900">
+<img src="assets/ui-v160-line.png" alt="v1.6.0 Line mode: one audio file per non-empty line" width="900">
 </p>
 <p align="center">
   <sub>Line mode · every non-empty line becomes one audio file, ready for narration, explainer videos, and batch subtitles.</sub>
@@ -248,7 +249,7 @@ After generation, click **Review result** on the main window to preview, proof-r
 - **Export final ZIP** — one click bundles MP3 files, SRT subtitles, and timeline JSON.
 
 <p align="center">
-  <img src="assets/ui-v154-result.png" alt="v1.5.4 Review result window: play, subtitles, timeline, seeking, regenerate" width="900">
+<img src="assets/ui-v160-result.png" alt="v1.6.0 Review result window: play, subtitles, timeline, seeking, regenerate" width="900">
 </p>
 <p align="center">
   <sub>The result viewer in "all items" mode: number, subtitle text, timeline, play / regenerate, and a draggable progress bar.</sub>
@@ -286,13 +287,13 @@ The feature we are most proud of — enable the **Timeline JSON + highlight** to
 - **Precise with no extra synthesis**: the MP3 and timeline are produced in the same request, using sentence-boundary metadata returned directly by Microsoft TTS. **No re-rendering** is needed; files are saved locally, free, with no API key.
 
 <p align="center">
-  <img src="assets/ui-v154-highlight.png" alt="Live sentence highlight while playing, with the red Stop button" width="900">
+<img src="assets/ui-v160-highlight.png" alt="Live sentence highlight while playing, with the red Stop button" width="900">
 </p>
 <p align="center">
   <sub>Live sentence highlight: the sentence being read lights up in the article, and the Play button becomes a red Stop button.</sub>
 </p>
 <p align="center">
-  <img src="assets/ui-v154-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="600">
+<img src="assets/ui-v160-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="600">
 </p>
 
 Example `.timeline.json`:

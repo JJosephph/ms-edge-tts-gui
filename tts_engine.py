@@ -40,7 +40,11 @@ RETRY_BASE_DELAY = 3.0        # 首次自动重试前等待（秒）
 RETRY_MAX_DELAY = 15.0        # 自动重试等待上限（秒）
 PROGRESS_REPORT_INTERVAL = 0.25
 DEFAULT_DIRECTIVE_PAUSE_MS = 300
-MAX_DIRECTIVE_PAUSE_MS = 10000
+MIN_PAUSE_MS = 50
+MAX_PAUSE_MS = 10000
+MAX_DIRECTIVE_PAUSE_MS = MAX_PAUSE_MS
+POSTPROCESS_SAMPLE_RATE = 24000
+MP3_FRAME_MS = 48
 
 NEW_EDGE_TTS_WSS_URL = (
     "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
@@ -94,6 +98,31 @@ def _parse_pause_value(raw_value: Optional[str], fallback_ms: int) -> int:
     return max(0, min(MAX_DIRECTIVE_PAUSE_MS, round(value)))
 
 
+def validate_pause_ms(value: object, *, allow_zero: bool = True) -> int:
+    """Return a pause value that the postprocessor can honour exactly.
+
+    MP3 at 24 kHz has 1152 samples per frame (48 ms). The client deliberately
+    exposes 50 ms as the smallest non-zero pause: below that, codec transients
+    make the requested interval unreliable even though the PCM sample count
+    could technically be written. Rejecting the range is clearer than showing
+    a value that cannot be heard or measured consistently.
+    """
+    try:
+        parsed = int(round(float(value)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("停顿时间必须是整数毫秒。") from exc
+    if parsed == 0:
+        if allow_zero:
+            return 0
+        raise ValueError(f"停顿时间必须为 {MIN_PAUSE_MS}–{MAX_PAUSE_MS} 毫秒。")
+    if parsed < MIN_PAUSE_MS or parsed > MAX_PAUSE_MS:
+        raise ValueError(
+            f"停顿时间必须为 0 或 {MIN_PAUSE_MS}–{MAX_PAUSE_MS} 毫秒；"
+            f"低于 {MIN_PAUSE_MS} 毫秒受 MP3 编码帧限制，无法保证稳定生效。"
+        )
+    return parsed
+
+
 def parse_pause_directives(text: str, default_pause_ms: int = 0) -> tuple[str, dict[int, int]]:
     """Remove inline pause directives and map each one to a sentence index.
 
@@ -140,8 +169,8 @@ def _sentence_end_positions(text: str) -> list[int]:
             positions.append(line_start + end)
             i = end
         line_end = len(line.rstrip())
-        has_spoken_text = PAUSE_DIRECTIVE_PATTERN.sub("", line).strip()
-        if line_end and has_spoken_text:
+        spoken_line = PAUSE_DIRECTIVE_PATTERN.sub("", line)
+        if line_end and _has_spoken_content(spoken_line):
             position = line_start + line_end
             if position not in positions:
                 positions.append(position)
@@ -162,7 +191,9 @@ def _iter_lines_with_offsets(text: str):
 def insert_sentence_pause_directives(text: str, pause_ms: int) -> str:
     """Insert one inline pause marker after each non-final sentence."""
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    value = max(0, min(MAX_DIRECTIVE_PAUSE_MS, int(pause_ms)))
+    if int(pause_ms) <= 0:
+        return text
+    value = validate_pause_ms(pause_ms, allow_zero=False)
     if not text.strip() or value <= 0:
         return text
     positions = _sentence_end_positions(text)
@@ -185,6 +216,10 @@ SENTENCE_ABBREVIATIONS = {
     "mr", "mrs", "ms", "dr", "rev", "st", "prof", "sr", "jr",
     "vs", "cf", "e.g", "i.e", "etc",
 }
+
+
+def _has_spoken_content(text: str) -> bool:
+    return bool(re.search(r"[\w\u4e00-\u9fff]", text or "", flags=re.UNICODE))
 
 
 def split_reading_sentences(text: str) -> list:
@@ -210,14 +245,14 @@ def split_reading_sentences(text: str) -> list:
             while end < len(value) and value[end] in "\"')\u2019\u201d\u300d\u3011]":
                 end += 1
             sentence = value[start:end].strip()
-            if sentence:
+            if sentence and _has_spoken_content(sentence):
                 sentences.append(sentence)
             start = end
             while start < len(value) and value[start].isspace():
                 start += 1
             i = start
         tail = value[start:].strip()
-        if tail:
+        if tail and _has_spoken_content(tail):
             sentences.append(tail)
     return sentences
 
@@ -308,6 +343,150 @@ def build_sentence_timeline(
     }
 
 
+def _normalize_timing_text(text: object) -> str:
+    """Normalize boundary text for matching while ignoring punctuation/spacing."""
+    return re.sub(r"[\W_]+", "", str(text or ""), flags=re.UNICODE).lower()
+
+
+def build_sentence_timeline_from_word_boundaries(
+    source_text: str, word_boundaries: list, voice: str, rate: str
+) -> dict:
+    """Build sentence cues from WordBoundary events.
+
+    SentenceBoundary durations include Edge's trailing silence. WordBoundary
+    gives the actual last-word end, which is the anchor needed when replacing
+    native gaps with an exact user-selected duration.
+    """
+    segments = split_reading_sentences(source_text)
+    events = []
+    for boundary in word_boundaries:
+        text = str(boundary.get("text", "")).strip()
+        start = seconds_from_edge_ticks(boundary.get("offset"))
+        duration = seconds_from_edge_ticks(boundary.get("duration"))
+        end = start + duration
+        if not text or duration <= 0 or end <= start:
+            continue
+        events.append(
+            {
+                "text": text,
+                "start": start,
+                "end": end,
+                "normalized": _normalize_timing_text(text),
+            }
+        )
+    if not segments or not events:
+        raise RuntimeError("TTS 未返回可用的 WordBoundary，无法保证精确停顿。")
+
+    entries = []
+    cursor = 0
+    for source_index, segment in enumerate(segments):
+        target = _normalize_timing_text(segment)
+        if not target:
+            continue
+        consumed = []
+        while cursor < len(events):
+            event = events[cursor]
+            if not event["normalized"]:
+                cursor += 1
+                continue
+            candidate = _normalize_timing_text(
+                "".join(item["text"] for item in consumed) + event["text"]
+            )
+            if target.startswith(candidate):
+                consumed.append(event)
+                cursor += 1
+                if candidate == target:
+                    break
+                continue
+            break
+
+        if not consumed:
+            # A punctuation-only or unsupported segment can appear between
+            # spoken sentences. Skip it rather than shifting every later cue.
+            continue
+
+        start = consumed[0]["start"]
+        end = consumed[-1]["end"]
+        if end <= start:
+            continue
+        entries.append(
+            {
+                "index": len(entries),
+                "source_index": source_index,
+                "start": round(start, 4),
+                "end": round(end, 4),
+                "word_count": count_spoken_words(segment),
+                "text": segment,
+            }
+        )
+
+    if not entries:
+        raise RuntimeError("无法将 WordBoundary 映射到朗读文本。")
+
+    # If the service returns extra trailing events, accept them only when the
+    # remaining event text exactly matches the remaining source text. Never
+    # attach unmatched words to the previous cue: that would make a requested
+    # pause appear at the wrong place.
+    if cursor < len(events):
+        last_source_index = int(entries[-1]["source_index"])
+        remaining_source = _normalize_timing_text(
+            "".join(segments[last_source_index + 1 :])
+        )
+        remaining_events = _normalize_timing_text(
+            "".join(item["text"] for item in events[cursor:])
+        )
+        if not remaining_source or remaining_events != remaining_source:
+            raise RuntimeError(
+                "WordBoundary 与朗读文本无法精确对齐，已停止后处理以避免停顿错位。"
+            )
+        start = events[cursor]["start"]
+        end = events[-1]["end"]
+        if end > start:
+            entries.append(
+                {
+                    "index": len(entries),
+                    "source_index": last_source_index + 1,
+                    "start": round(start, 4),
+                    "end": round(end, 4),
+                    "word_count": count_spoken_words(remaining_source),
+                    "text": " ".join(segments[last_source_index + 1 :]).strip(),
+                }
+            )
+
+    return {
+        "version": 1,
+        "kind": "sentence",
+        "engine": "edge-tts",
+        "boundary": "WordBoundary",
+        "voice": voice,
+        "rate": rate,
+        "sentences": entries,
+    }
+
+
+def line_end_sentence_indices(text: str) -> list[int]:
+    """Return source sentence indexes that end each non-empty spoken line."""
+    indexes = []
+    sentence_count = 0
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalized.splitlines():
+        segments = split_reading_sentences(line)
+        if not segments:
+            continue
+        sentence_count += len(segments)
+        indexes.append(sentence_count - 1)
+    return indexes
+
+
+def merge_pause_overrides(
+    explicit: Optional[dict[int, int]], defaults: Optional[dict[int, int]]
+) -> dict[int, int]:
+    """Merge pause defaults without overriding explicit inline directives."""
+    merged = dict(defaults or {})
+    merged.update(dict(explicit or {}))
+    return merged
+
+
 def timeline_to_srt(timeline: Optional[dict]) -> str:
     """Convert the final sentence timeline to UTF-8 SRT text."""
     def stamp(seconds: float) -> str:
@@ -334,18 +513,26 @@ def insert_sentence_pauses(
     pause_ms: int,
     pause_overrides: Optional[dict[int, int]] = None,
     pause_marks: Optional[set[str]] = None,
+    tail_pause_ms: Optional[int] = None,
 ) -> dict:
-    """Replace native sentence gaps with exact silence durations.
+    """Replace native gaps and optionally rewrite the final tail.
 
-    With no inline overrides, a positive ``pause_ms`` applies to every gap.
-    When overrides are present, untagged gaps keep their native timing while
-    tagged gaps are replaced by the requested duration (including ``0``).
+    All values are converted to an exact number of 24 kHz PCM frames before
+    encoding. A zero override removes the native gap instead of appending
+    silence, which keeps timeline JSON, SRT cues, and audio in sync.
     """
     pause_overrides = dict(pause_overrides or {})
-    if pause_ms <= 0 and not pause_overrides:
+    pause_ms = validate_pause_ms(pause_ms)
+    if tail_pause_ms is not None:
+        tail_pause_ms = validate_pause_ms(tail_pause_ms)
+    pause_overrides = {
+        int(index): validate_pause_ms(value)
+        for index, value in pause_overrides.items()
+    }
+    if pause_ms <= 0 and not pause_overrides and tail_pause_ms is None:
         return timeline
     entries = list((timeline or {}).get("sentences", []))
-    if len(entries) < 2:
+    if not entries:
         return timeline
 
     try:
@@ -360,7 +547,7 @@ def insert_sentence_pauses(
         audio_path,
         output_format=miniaudio.SampleFormat.SIGNED16,
         nchannels=1,
-        sample_rate=24000,
+        sample_rate=POSTPROCESS_SAMPLE_RATE,
     )
     pcm = bytes(decoded.samples)
     bytes_per_frame = 2
@@ -376,6 +563,7 @@ def insert_sentence_pauses(
         original_start = float(entry["start"])
         original_end = float(entry["end"])
         original_duration = max(0.0, original_end - original_start)
+        source_index = int(entry.get("source_index", index))
         item["start"] = round(
             pending_start if pending_start is not None else original_start + shift,
             4,
@@ -383,10 +571,23 @@ def insert_sentence_pauses(
         item["end"] = round(item["start"] + original_duration, 4)
         adjusted.append(item)
         if index >= len(entries) - 1:
+            end_frame = max(
+                cursor // bytes_per_frame,
+                round(original_end * decoded.sample_rate),
+            )
+            end_byte = min(len(pcm), end_frame * bytes_per_frame)
+            output.extend(pcm[cursor:end_byte])
+            if tail_pause_ms is None:
+                cursor = end_byte
+            else:
+                silence_frames = round(decoded.sample_rate * tail_pause_ms / 1000)
+                output.extend(b"\x00" * silence_frames * bytes_per_frame)
+                cursor = len(pcm)
+                changed = True
             continue
         end_frame = max(
             cursor // bytes_per_frame,
-            round(float(entry["end"]) * decoded.sample_rate),
+            round(original_end * decoded.sample_rate),
         )
         end_byte = min(len(pcm), end_frame * bytes_per_frame)
         output.extend(pcm[cursor:end_byte])
@@ -399,7 +600,7 @@ def insert_sentence_pauses(
             0.0,
             float(entries[index + 1]["start"]) - original_end,
         )
-        desired_pause = pause_overrides.get(index)
+        desired_pause = pause_overrides.get(source_index)
         if desired_pause is None and pause_ms > 0 and (
             pause_marks is None
             or str(entry.get("text", "")).rstrip()[-1:] in pause_marks
@@ -415,7 +616,7 @@ def insert_sentence_pauses(
             )
             continue
 
-        desired_pause = max(0, min(MAX_DIRECTIVE_PAUSE_MS, int(desired_pause)))
+        desired_pause = validate_pause_ms(desired_pause)
         silence_frames = round(decoded.sample_rate * desired_pause / 1000)
         output.extend(b"\x00" * silence_frames * bytes_per_frame)
         cursor = next_start_byte
@@ -447,51 +648,24 @@ def insert_sentence_pauses(
         result["sentence_pause_ms"] = pause_ms
     if pause_overrides:
         result["sentence_pause_overrides"] = pause_overrides
+    if tail_pause_ms is not None:
+        result["line_pause_ms"] = tail_pause_ms
+        result["duration_padding_ms"] = tail_pause_ms
+        sentence_end = max(
+            [float(item.get("end", 0)) for item in result.get("sentences", [])] or [0.0]
+        )
+        result["duration"] = round(sentence_end + tail_pause_ms / 1000.0, 4)
     return result
 
 
 def append_audio_silence(audio_path: str, timeline: dict, pause_ms: int) -> dict:
-    """Append exact silence to the end of an audio file and extend its timeline."""
-    pause_ms = max(0, min(MAX_DIRECTIVE_PAUSE_MS, int(pause_ms)))
-    if pause_ms <= 0:
-        return timeline
-    try:
-        import lameenc
-        import miniaudio
-    except ImportError as exc:  # pragma: no cover - packaging dependency
-        raise AudioPostProcessError("缺少音频停顿处理组件，请重新安装完整版本。") from exc
-
-    decoded = miniaudio.decode_file(
+    """Backward-compatible wrapper for replacing the final audio tail."""
+    return insert_sentence_pauses(
         audio_path,
-        output_format=miniaudio.SampleFormat.SIGNED16,
-        nchannels=1,
-        sample_rate=24000,
+        timeline,
+        0,
+        tail_pause_ms=pause_ms,
     )
-    pcm = bytes(decoded.samples)
-    bytes_per_frame = 2
-    silence_frames = round(decoded.sample_rate * pause_ms / 1000)
-    output = pcm + (b"\x00" * silence_frames * bytes_per_frame)
-    encoder = lameenc.Encoder()
-    encoder.set_bit_rate(48)
-    encoder.set_in_sample_rate(decoded.sample_rate)
-    encoder.set_channels(1)
-    encoder.set_quality(2)
-    encoded = encoder.encode(output) + encoder.flush()
-    temp_path = audio_path + ".tail"
-    try:
-        with open(temp_path, "wb") as handle:
-            handle.write(encoded)
-        TTSEngine._safe_replace(temp_path, audio_path)
-    finally:
-        TTSEngine._safe_unlink(temp_path)
-
-    result = dict(timeline)
-    result["line_pause_ms"] = pause_ms
-    result["duration_padding_ms"] = pause_ms
-    sentence_end = max([float(item.get("end", 0)) for item in result.get("sentences", [])] or [0.0])
-    result["duration"] = round(sentence_end + pause_ms / 1000.0, 4)
-    result["audio_duration"] = round(audio_duration_seconds(audio_path), 4)
-    return result
 
 
 
@@ -631,6 +805,7 @@ class TTSConfig:
     pitch: str = "+0Hz"
     sentence_pause_ms: int = 0
     sentence_pause_marks: tuple[str, ...] = ()
+    line_pause_enabled: bool = False
     line_pause_ms: int = 0
 
 
@@ -650,6 +825,7 @@ class TTSEngine:
         self.cancel_event = cancel_event or threading.Event()
         self.proxy = detect_proxy()
         self.sentence_boundaries: list = []
+        self.word_boundaries: list = []
         self.timeline: Optional[dict] = None
         self.error_message = ""
         self._suppress_stall_prompts = False
@@ -707,12 +883,31 @@ class TTSEngine:
         self._safe_unlink(temp_path)
         self.error_message = ""
         self.sentence_boundaries = []
+        self.word_boundaries = []
         self.timeline = None
         spoken_text, pause_overrides = parse_pause_directives(
             text, cfg.sentence_pause_ms
         )
         if not spoken_text.strip():
             raise RuntimeError("停顿指令之外没有可朗读的文字。")
+        try:
+            cfg.sentence_pause_ms = validate_pause_ms(cfg.sentence_pause_ms)
+            cfg.line_pause_ms = validate_pause_ms(cfg.line_pause_ms)
+            pause_overrides = {
+                int(index): validate_pause_ms(value)
+                for index, value in pause_overrides.items()
+            }
+        except ValueError as exc:
+            raise AudioPostProcessError(str(exc)) from exc
+
+        sentence_pause_active = (
+            cfg.sentence_pause_ms > 0 and bool(cfg.sentence_pause_marks)
+        )
+        needs_word_boundary = (
+            sentence_pause_active
+            or cfg.line_pause_enabled
+            or bool(pause_overrides)
+        )
 
         communicate = edge_tts.Communicate(
             text=spoken_text,
@@ -720,7 +915,7 @@ class TTSEngine:
             rate=cfg.rate,
             volume=cfg.volume,
             pitch=cfg.pitch,
-            boundary="SentenceBoundary",
+            boundary="WordBoundary" if needs_word_boundary else "SentenceBoundary",
             proxy=self.proxy,
             connect_timeout=CONNECT_TIMEOUT,
             receive_timeout=RECEIVE_TIMEOUT,
@@ -846,8 +1041,11 @@ class TTSEngine:
                         if now - last_report >= PROGRESS_REPORT_INTERVAL:
                             last_report = now
                             self.on_progress(percent, written)
-                    elif chunk_type == "SentenceBoundary":
-                        self.sentence_boundaries.append(chunk)
+                    elif chunk_type in ("SentenceBoundary", "WordBoundary"):
+                        if chunk_type == "SentenceBoundary":
+                            self.sentence_boundaries.append(chunk)
+                        else:
+                            self.word_boundaries.append(chunk)
                         completed_units += estimate_spoken_units(chunk.get("text", ""))
                         percent = min(99, int(completed_units * 100 / total_units))
                         now = time.perf_counter()
@@ -858,29 +1056,49 @@ class TTSEngine:
             if written == 0:
                 raise RuntimeError("TTS 未返回任何音频数据。")
 
-            if not self.sentence_boundaries:
-                raise RuntimeError(
-                    "TTS 未返回 SentenceBoundary，无法生成精准时间轴。"
+            if needs_word_boundary:
+                if not self.word_boundaries:
+                    raise RuntimeError(
+                        "TTS 未返回 WordBoundary，无法保证精确停顿。"
+                    )
+                self.timeline = build_sentence_timeline_from_word_boundaries(
+                    spoken_text, self.word_boundaries, cfg.voice, cfg.rate
                 )
-            self.timeline = build_sentence_timeline(
-                self.sentence_boundaries, cfg.voice, cfg.rate
-            )
+            else:
+                if not self.sentence_boundaries:
+                    raise RuntimeError(
+                        "TTS 未返回 SentenceBoundary，无法生成精准时间轴。"
+                    )
+                self.timeline = build_sentence_timeline(
+                    self.sentence_boundaries, cfg.voice, cfg.rate
+                )
             final_path = os.path.abspath(output_path)
             os.makedirs(os.path.dirname(final_path), exist_ok=True)
             self._safe_replace(temp_path, final_path)
-            if cfg.sentence_pause_ms > 0 or pause_overrides:
+            line_overrides: dict[int, int] = {}
+            if cfg.line_pause_enabled:
+                line_indexes = line_end_sentence_indices(spoken_text)
+                line_overrides = {
+                    source_index: cfg.line_pause_ms
+                    for source_index in line_indexes[:-1]
+                }
+                pause_overrides = merge_pause_overrides(
+                    pause_overrides, line_overrides
+                )
+            if (
+                sentence_pause_active
+                or pause_overrides
+                or cfg.line_pause_enabled
+            ):
                 self.timeline = insert_sentence_pauses(
                     final_path,
                     self.timeline,
-                    cfg.sentence_pause_ms,
+                    cfg.sentence_pause_ms if sentence_pause_active else 0,
                     pause_overrides=pause_overrides,
                     pause_marks=set(cfg.sentence_pause_marks),
-                )
-            if cfg.line_pause_ms > 0:
-                self.timeline = append_audio_silence(
-                    final_path,
-                    self.timeline,
-                    cfg.line_pause_ms,
+                    tail_pause_ms=(
+                        cfg.line_pause_ms if cfg.line_pause_enabled else None
+                    ),
                 )
             # Store the decoder-measured duration for playback controls. The
             # sentence timeline remains logical and millisecond-precise while

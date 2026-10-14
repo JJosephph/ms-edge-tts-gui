@@ -9,10 +9,13 @@ import miniaudio
 from tts_engine import (
     append_audio_silence,
     audio_duration_seconds,
+    build_sentence_timeline_from_word_boundaries,
     insert_sentence_pause_directives,
     insert_sentence_pauses,
+    line_end_sentence_indices,
     parse_pause_directives,
     timeline_to_srt,
+    validate_pause_ms,
 )
 
 
@@ -32,19 +35,68 @@ def _write_test_mp3(path: Path, duration_seconds: float = 1.2) -> None:
 
 
 class SubtitleTests(unittest.TestCase):
-    def test_small_line_pause_is_kept_in_logical_timeline_and_reports_audio_duration(self):
+    def test_pause_below_supported_mp3_range_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_pause_ms(1)
+        with self.assertRaises(ValueError):
+            validate_pause_ms(49)
+        self.assertEqual(validate_pause_ms(50), 50)
+
+    def test_minimum_line_pause_is_kept_in_logical_timeline_and_reports_audio_duration(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "test.mp3"
             _write_test_mp3(path, duration_seconds=1.0)
             timeline = {"sentences": [{"start": 0.0, "end": 1.0, "text": "One."}]}
 
-            adjusted = append_audio_silence(str(path), timeline, 1)
+            adjusted = append_audio_silence(str(path), timeline, 50)
             measured = audio_duration_seconds(str(path))
 
-        self.assertEqual(adjusted["duration_padding_ms"], 1)
-        self.assertAlmostEqual(adjusted["duration"], 1.001, places=3)
+        self.assertEqual(adjusted["duration_padding_ms"], 50)
+        self.assertAlmostEqual(adjusted["duration"], 1.05, places=3)
         self.assertGreater(adjusted["audio_duration"], 1.0)
         self.assertAlmostEqual(adjusted["audio_duration"], measured, places=3)
+
+    def test_word_boundaries_use_real_word_ends_for_pause_timeline(self):
+        payload = build_sentence_timeline_from_word_boundaries(
+            "First line.\nSecond line.",
+            [
+                {"text": "First", "offset": 100000, "duration": 2000000},
+                {"text": "line", "offset": 2500000, "duration": 1500000},
+                {"text": "Second", "offset": 5000000, "duration": 2200000},
+                {"text": "line", "offset": 7600000, "duration": 1400000},
+            ],
+            "en-US-GuyNeural",
+            "+18%",
+        )
+
+        self.assertEqual(payload["boundary"], "WordBoundary")
+        self.assertEqual(payload["sentences"][0]["start"], 0.01)
+        self.assertEqual(payload["sentences"][0]["end"], 0.4)
+        self.assertEqual(payload["sentences"][1]["start"], 0.5)
+        self.assertEqual(payload["sentences"][1]["end"], 0.9)
+
+    def test_line_end_indexes_include_multiple_sentences_per_line(self):
+        self.assertEqual(
+            line_end_sentence_indices("One. Two.\nThree\nFour. Five."),
+            [1, 2, 4],
+        )
+        self.assertEqual(
+            line_end_sentence_indices("One. ...\nTwo."),
+            [0, 1],
+        )
+
+    def test_word_boundary_mismatch_is_rejected_instead_of_shifted(self):
+        with self.assertRaises(RuntimeError):
+            build_sentence_timeline_from_word_boundaries(
+                "First line.\nSecond line.",
+                [
+                    {"text": "First", "offset": 0, "duration": 1000000},
+                    {"text": "line", "offset": 1000000, "duration": 1000000},
+                    {"text": "unexpected", "offset": 2000000, "duration": 1000000},
+                ],
+                "en-US-GuyNeural",
+                "+18%",
+            )
 
     def test_formats_sentence_timeline_as_srt(self):
         srt = timeline_to_srt(
@@ -128,6 +180,21 @@ class SubtitleTests(unittest.TestCase):
             )
         self.assertEqual(adjusted["sentences"][1]["start"], 0.6)
         self.assertEqual(adjusted["sentence_pause_overrides"], {0: 200})
+
+    def test_zero_override_removes_native_gap(self):
+        timeline = {
+            "sentences": [
+                {"index": 0, "start": 0.0, "end": 0.4, "text": "One."},
+                {"index": 1, "start": 0.7, "end": 1.1, "text": "Two."},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.mp3"
+            _write_test_mp3(path, duration_seconds=1.2)
+            adjusted = insert_sentence_pauses(
+                str(path), timeline, 0, pause_overrides={0: 0}
+            )
+        self.assertEqual(adjusted["sentences"][1]["start"], 0.4)
 
     def test_pause_timeline_does_not_keep_overlapping_native_boundary(self):
         timeline = {

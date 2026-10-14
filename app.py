@@ -29,7 +29,9 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 from tts_engine import (
+    MAX_PAUSE_MS,
     MAX_RETRIES,
+    MIN_PAUSE_MS,
     ProbeResult,
     StallController,
     TTSConfig,
@@ -39,6 +41,7 @@ from tts_engine import (
     list_tts_voices,
     probe_network,
     timeline_to_srt,
+    validate_pause_ms,
 )
 from text_utils import clean_text, default_filename, normalize_for_tts
 from update_checker import ReleaseInfo, UpdateCheckResult, check_for_updates
@@ -52,12 +55,31 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.6.0"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
 UI_FONT_FAMILY = "Microsoft YaHei UI"
+
+
+def normalize_saved_pause(value: object, default: int = 0) -> int:
+    """Migrate old settings to the supported exact-pause range."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return 0
+    return max(MIN_PAUSE_MS, min(MAX_PAUSE_MS, parsed))
+
+
+def saved_int(settings: dict, key: str, default: int) -> int:
+    """Read an int setting, tolerating missing or corrupted values."""
+    try:
+        return int(settings.get(key, default))
+    except (TypeError, ValueError):
+        return default
 UI_FONT_FALLBACKS = ("Microsoft YaHei", "SimHei", "Arial")
 SETTINGS_DIR = Path(os.environ.get("APPDATA", Path.home())) / "EdgeTTSGui"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
@@ -120,9 +142,15 @@ class App(ctk.CTk):
         ctk.ThemeManager.theme["CTkFont"]["family"] = self._font_family
 
         self.title(f"{APP_NAME} v{APP_VERSION}")
-        # Give the composer and the settings deck enough room for readable controls.
-        self.geometry("1180x860")
-        self.minsize(1080, 760)
+        # Fit the window to the display so it never opens larger than the
+        # available screen (small laptops, 1366x768 panels, high-DPI displays).
+        scale = ctk.ScalingTracker.get_window_scaling(self) or 1.0
+        avail_w = int((self.winfo_screenwidth() - 60) / scale)
+        avail_h = int((self.winfo_screenheight() - 110) / scale)
+        win_w = max(980, min(1180, avail_w))
+        win_h = max(600, min(860, avail_h))
+        self.geometry(f"{win_w}x{win_h}")
+        self.minsize(min(1000, win_w), min(620, win_h))
 
         self._ui_q: "queue.Queue" = queue.Queue()
         self._stall_req_q: "queue.Queue" = queue.Queue()
@@ -143,27 +171,28 @@ class App(ctk.CTk):
         self._voice_map: dict = {}
         self._groups_engine: Optional[VoiceGroupingEngine] = None
         self._voices_load_error: str | None = None
-        self._language = "zh"
-        self._selected_lang = "en"
-        self._selected_gender = "Male"
+        saved_language = str(self._settings.get("ui_language") or "zh")
+        self._language = saved_language if saved_language in ("zh", "en") else "zh"
+        self._selected_lang = str(self._settings.get("voice_lang") or "en")
+        self._selected_gender = str(self._settings.get("voice_gender") or "Male")
         self._lang_map: dict = {}
         self._gender_map: dict = {}
-        self._selected_voice_code = DEFAULT_VOICE
+        self._selected_voice_code = str(self._settings.get("voice") or DEFAULT_VOICE)
+        self._rate_value = saved_int(self._settings, "rate", DEFAULT_RATE)
+        self._volume_value = saved_int(self._settings, "volume", DEFAULT_VOLUME)
+        self._pitch_value = saved_int(self._settings, "pitch", DEFAULT_PITCH)
         self._generated_path: str | None = None
         self._generated_text: str | None = None
         self._timeline_enabled = bool(self._settings.get("timeline_json", False))
         self._srt_enabled = bool(self._settings.get("srt_subtitles", False))
-        try:
-            saved_pause_ms = int(self._settings.get("sentence_pause_ms", 0))
-        except (TypeError, ValueError):
-            saved_pause_ms = 0
-        self._sentence_pause_ms = max(0, min(10000, saved_pause_ms))
+        self._sentence_pause_ms = normalize_saved_pause(
+            self._settings.get("sentence_pause_ms", 0)
+        )
         self._sentence_pause_enabled = bool(self._settings.get("sentence_pause_enabled", self._sentence_pause_ms > 0))
         self._line_pause_enabled = bool(self._settings.get("line_pause_enabled", False))
-        try:
-            self._line_pause_ms = max(0, min(10000, int(self._settings.get("line_pause_ms", 300))))
-        except (TypeError, ValueError):
-            self._line_pause_ms = 300
+        self._line_pause_ms = normalize_saved_pause(
+            self._settings.get("line_pause_ms", 300), default=300
+        )
         saved_marks = self._settings.get("sentence_pause_marks")
         self._sentence_pause_marks = set(saved_marks) if isinstance(saved_marks, list) else set("。.!！?？")
         self._generated_timeline: dict | None = None
@@ -201,6 +230,8 @@ class App(ctk.CTk):
         self._mode_settings_hint = None
         self._pause_label = None
         self._pause_entry = None
+        self._sentence_pause_row = None
+        self._sentence_pause_hint = None
         self._punctuation_label = None
         self._punctuation_frame = None
         self._line_pause_section = None
@@ -291,23 +322,24 @@ class App(ctk.CTk):
         "punctuation_question": {"zh": "问号", "en": "Question"},
         "punctuation_semicolon": {"zh": "分号", "en": "Semicolon"},
         "pause_unit": {"zh": "毫秒", "en": "ms"},
-        "pause_directive_help": {"zh": "支持 [pause:500ms]、[pause:1.5s]、[pause:weak/medium/strong]；指令不会被朗读。", "en": "Supports [pause:500ms], [pause:1.5s], and [pause:weak/medium/strong]; markers are not spoken."},
+        "pause_range_hint": {"zh": f"精确范围：0 或 {MIN_PAUSE_MS}–{MAX_PAUSE_MS} ms，按 24 kHz 采样点写入；低于 {MIN_PAUSE_MS} ms 不提供。MP3 文件总时长仍会按帧取整。", "en": f"Exact range: 0 or {MIN_PAUSE_MS}-{MAX_PAUSE_MS} ms, written at 24 kHz sample precision; values below {MIN_PAUSE_MS} ms are not offered. Total MP3 duration is still frame-aligned."},
+        "pause_directive_help": {"zh": f"支持 [pause:500ms]、[pause:1.5s]、[pause:weak/medium/strong]；有效非零停顿为 {MIN_PAUSE_MS}–{MAX_PAUSE_MS} ms，指令不会被朗读。", "en": f"Supports [pause:500ms], [pause:1.5s], and [pause:weak/medium/strong]; non-zero pauses must be {MIN_PAUSE_MS}-{MAX_PAUSE_MS} ms and are not spoken."},
         "sentence_pause_action": {"zh": "批量插入句末停顿", "en": "Insert end pauses"},
         "mode_settings_normal": {"zh": "普通模式 · 音频设置", "en": "Normal · Audio settings"},
         "mode_settings_page": {"zh": "逐页模式 · 音频设置", "en": "By Page · Audio settings"},
         "mode_settings_line": {"zh": "逐行模式 · 音频设置", "en": "By Line · Audio settings"},
         "mode_settings_hint_normal": {"zh": "整段文本生成一个音频文件。", "en": "The full text becomes one audio file."},
         "mode_settings_hint_page": {"zh": "每页独立生成音频，适合章节或镜头批量导出。", "en": "Each page becomes a separate audio file for batch export."},
-        "mode_settings_hint_line": {"zh": "每个非空行独立生成音频，适合短句旁白批量导出。", "en": "Each non-empty line becomes a separate audio file for short narration."},
+        "mode_settings_hint_line": {"zh": "直接生成全文时会精确改写行间停顿；按行准备后可逐行导出独立音频。", "en": "Generating the full text applies exact line gaps; Prepare Lines exports each line as an independent audio file."},
         "pause_label_normal": {"zh": "句间停顿", "en": "Sentence pause"},
         "pause_label_page": {"zh": "每页默认句间停顿", "en": "Default pause per page"},
         "pause_label_line": {"zh": "每行默认句间停顿", "en": "Default pause per line"},
         "pause_dialog_title": {"zh": "批量插入句末停顿", "en": "Insert end-of-sentence pauses"},
-        "pause_dialog_hint": {"zh": "在每个句末自动加入 pause 指令（最后一句不添加）。已有指令会跳过。", "en": "Add a pause marker after each sentence (the final sentence is skipped). Existing markers are preserved."},
+        "pause_dialog_hint": {"zh": f"在每个句末自动加入 pause 指令（最后一句不添加），有效值为 {MIN_PAUSE_MS}–{MAX_PAUSE_MS} ms。已有指令会跳过。", "en": f"Add a pause marker after each sentence (the final sentence is skipped); valid values are {MIN_PAUSE_MS}-{MAX_PAUSE_MS} ms. Existing markers are preserved."},
         "pause_custom": {"zh": "自定义毫秒", "en": "Custom ms"},
         "pause_apply": {"zh": "插入", "en": "Insert"},
         "pause_inserted": {"zh": "已插入 {count} 个句末停顿指令。", "en": "Inserted {count} end-of-sentence pause marker(s)."},
-        "pause_invalid": {"zh": "请输入 0 到 10000 之间的整数毫秒。", "en": "Enter an integer from 0 to 10000 milliseconds."},
+        "pause_invalid": {"zh": f"请输入 0，或 {MIN_PAUSE_MS} 到 {MAX_PAUSE_MS} 之间的整数毫秒。", "en": f"Enter 0 or an integer from {MIN_PAUSE_MS} to {MAX_PAUSE_MS} milliseconds."},
         "srt_subtitles": {"zh": "生成 SRT 字幕", "en": "Generate SRT subtitles"},
 
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
@@ -632,6 +664,8 @@ class App(ctk.CTk):
             messagebox.showinfo(self._app_name(), "Please stop the current task first." if self._language == "en" else "请先停止当前任务。")
             return
         self._language = "en" if self._language == "zh" else "zh"
+        self._settings["ui_language"] = self._language
+        self._save_settings()
         self._rebuild_ui()
 
     def _build_ui(self):
@@ -759,6 +793,10 @@ class App(ctk.CTk):
         deck_shell.grid(row=0, column=1, sticky="nsew")
         deck_shell.grid_columnconfigure(0, weight=1)
         deck_shell.grid_rowconfigure(0, weight=1)
+        # The action area lives in a fixed footer so the primary "生成" button
+        # stays reachable even when the settings panel has to scroll on shorter
+        # windows or high-DPI displays.
+        deck_shell.grid_rowconfigure(1, weight=0)
         deck = ctk.CTkScrollableFrame(
             deck_shell,
             width=373,
@@ -769,8 +807,16 @@ class App(ctk.CTk):
             scrollbar_button_color=self._c("border"),
             scrollbar_button_hover_color=self._c("card_raised"),
         )
-        deck.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        deck.grid(row=0, column=0, sticky="nsew", padx=1, pady=(1, 0))
         deck.grid_columnconfigure(0, weight=1)
+        deck_footer = ctk.CTkFrame(
+            deck_shell, fg_color=self._c("card"), corner_radius=0, border_width=0
+        )
+        deck_footer.grid(row=1, column=0, sticky="ew", padx=1, pady=(0, 1))
+        deck_footer.grid_columnconfigure(0, weight=1)
+        ctk.CTkFrame(deck_footer, height=1, fg_color=self._c("border")).grid(
+            row=0, column=0, sticky="ew"
+        )
 
         ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
 
@@ -843,6 +889,7 @@ class App(ctk.CTk):
         pause_row = ctk.CTkFrame(mode_settings, fg_color="transparent")
         pause_row.grid(row=2, column=0, sticky="ew", padx=14)
         pause_row.grid_columnconfigure(0, weight=1)
+        self._sentence_pause_row = pause_row
         self._sentence_pause_check = ctk.CTkCheckBox(
             pause_row,
             text=self._t("sentence_pause_enable"),
@@ -865,10 +912,20 @@ class App(ctk.CTk):
         self._pause_entry.bind("<FocusOut>", self._on_pause_changed)
         self._pause_entry.bind("<Return>", self._on_pause_changed)
         ctk.CTkLabel(duration_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(6, 0))
+        self._sentence_pause_hint = ctk.CTkLabel(
+            pause_row,
+            text=self._t("pause_range_hint"),
+            text_color=self._c("muted"),
+            anchor="w",
+            justify="left",
+            wraplength=360,
+            font=self._font(size=10),
+        )
+        self._sentence_pause_hint.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         self._punctuation_label = ctk.CTkLabel(pause_row, text=self._t("pause_punctuation"), text_color=self._c("muted"), anchor="w", font=self._font(size=11, weight="bold"))
-        self._punctuation_label.grid(row=2, column=0, sticky="w", pady=(9, 3))
+        self._punctuation_label.grid(row=3, column=0, sticky="w", pady=(9, 3))
         self._punctuation_frame = ctk.CTkFrame(pause_row, fg_color=self._c("field"), corner_radius=8, border_width=1, border_color=self._c("border"))
-        self._punctuation_frame.grid(row=3, column=0, sticky="ew")
+        self._punctuation_frame.grid(row=4, column=0, sticky="ew")
         for column in range(2):
             self._punctuation_frame.grid_columnconfigure(column, weight=1, uniform="punctuation")
         punctuation_defs = (
@@ -907,6 +964,15 @@ class App(ctk.CTk):
         self._line_pause_entry.bind("<FocusOut>", self._on_line_pause_changed)
         self._line_pause_entry.bind("<Return>", self._on_line_pause_changed)
         ctk.CTkLabel(line_duration_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(6, 0))
+        ctk.CTkLabel(
+            self._line_pause_section,
+            text=self._t("pause_range_hint"),
+            text_color=self._c("muted"),
+            anchor="w",
+            justify="left",
+            wraplength=360,
+            font=self._font(size=10),
+        ).grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 7))
         self._set_line_pause_controls_enabled(self._line_pause_enabled)
 
         timeline_row = ctk.CTkFrame(mode_settings, fg_color="transparent")
@@ -931,19 +997,19 @@ class App(ctk.CTk):
         self._add_slider_card(parameters, 1, self._t("volume"), self._volume_var, -50, 100, self._fmt_volume)
         self._add_slider_card(parameters, 2, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch)
 
-        status_row = ctk.CTkFrame(deck, fg_color="transparent")
-        status_row.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 3))
+        status_row = ctk.CTkFrame(deck_footer, fg_color="transparent")
+        status_row.grid(row=1, column=0, sticky="ew", padx=18, pady=(8, 3))
         status_row.grid_columnconfigure(0, weight=1)
         self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=self._font(size=12, weight="bold"))
         self._status_label.grid(row=0, column=0, sticky="w")
         self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, font=self._font(size=11), fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
         self._btn_stop.grid(row=0, column=1, sticky="e")
-        self._progress = ctk.CTkProgressBar(deck, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
-        self._progress.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 5))
+        self._progress = ctk.CTkProgressBar(deck_footer, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
+        self._progress.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 5))
         self._progress.set(0)
 
-        actions = ctk.CTkFrame(deck, fg_color="transparent")
-        actions.grid(row=8, column=0, sticky="ew", padx=18, pady=(0, 9))
+        actions = ctk.CTkFrame(deck_footer, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 9))
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
         self._btn_generate = ctk.CTkButton(actions, text=self._t("generate"), command=self._on_generate, height=36, font=self._font(size=14, weight="bold"), fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF")
@@ -1313,6 +1379,7 @@ class App(ctk.CTk):
         self._refresh_voice_selectors(preferred=DEFAULT_VOICE)
         self._invalidate_generated()
         self._update_voice_info()
+        self._persist_ui_settings()
         self.log(self._t("original"))
 
     def _selected_voice(self) -> str:
@@ -1470,6 +1537,10 @@ class App(ctk.CTk):
         if new_mode == "normal":
             self._replace_textbox(self._normal_text)
         elif new_mode == "line":
+            if not self._line_draft and self._normal_text:
+                # Carry the normal-mode draft into the line workspace on the
+                # first switch so changing modes never looks like lost text.
+                self._line_draft = self._normal_text
             self._replace_textbox(self._line_draft)
         else:
             self._replace_textbox("")
@@ -1515,9 +1586,20 @@ class App(ctk.CTk):
         self._mode_settings_hint.configure(text=self._t(f"mode_settings_hint_{mode}"))
         if self._line_pause_section is not None:
             if mode == "line":
-                self._line_pause_section.grid()
+                if self._sentence_pause_row is not None:
+                    self._sentence_pause_row.grid_configure(row=3)
+                self._line_pause_section.grid(row=2)
             else:
+                if self._sentence_pause_row is not None:
+                    self._sentence_pause_row.grid_configure(row=2)
                 self._line_pause_section.grid_remove()
+        if self._sentence_pause_hint is not None:
+            # In line mode the line-pause section above already states the
+            # supported range, so keep the panel free of a duplicate hint.
+            if mode == "line":
+                self._sentence_pause_hint.grid_remove()
+            else:
+                self._sentence_pause_hint.grid()
         self._sentence_pause_check.configure(text=self._t("sentence_pause_enable"))
         self._line_pause_check.configure(text=self._t("line_pause_enable"))
         self._timeline_check.configure(text=self._t("timeline"))
@@ -1586,6 +1668,7 @@ class App(ctk.CTk):
             pitch=f"{'+' if self._pitch_var.get() >= 0 else ''}{self._pitch_var.get()}Hz",
             sentence_pause_ms=self._sentence_pause_ms if self._sentence_pause_enabled else 0,
             sentence_pause_marks=tuple(sorted(self._sentence_pause_marks)),
+            line_pause_enabled=self._line_pause_enabled and self._workflow_mode == "line",
             line_pause_ms=self._line_pause_ms if self._line_pause_enabled and self._workflow_mode == "line" else 0,
         )
 
@@ -2723,10 +2806,10 @@ class App(ctk.CTk):
 
     def _on_pause_changed(self, _event=None):
         try:
-            value = int(self._pause_var.get().strip() or "0")
+            value = validate_pause_ms(self._pause_var.get().strip() or "0")
         except ValueError:
+            messagebox.showwarning(APP_NAME, self._t("pause_invalid"))
             value = self._sentence_pause_ms
-        value = max(0, min(10000, value))
         self._sentence_pause_ms = value
         self._pause_var.set(str(value))
         self._settings["sentence_pause_ms"] = value
@@ -2735,10 +2818,10 @@ class App(ctk.CTk):
 
     def _on_line_pause_changed(self, _event=None):
         try:
-            value = int(self._line_pause_var.get().strip() or "0")
+            value = validate_pause_ms(self._line_pause_var.get().strip() or "0")
         except ValueError:
+            messagebox.showwarning(APP_NAME, self._t("pause_invalid"))
             value = self._line_pause_ms
-        value = max(0, min(10000, value))
         self._line_pause_ms = value
         self._line_pause_var.set(str(value))
         self._settings["line_pause_ms"] = value
@@ -2776,11 +2859,8 @@ class App(ctk.CTk):
 
         def apply_value(raw_value):
             try:
-                value = int(str(raw_value).strip())
+                value = validate_pause_ms(str(raw_value).strip())
             except (TypeError, ValueError):
-                messagebox.showwarning(APP_NAME, self._t("pause_invalid"), parent=dialog)
-                return
-            if not 0 <= value <= 10000:
                 messagebox.showwarning(APP_NAME, self._t("pause_invalid"), parent=dialog)
                 return
             if self._pages:
@@ -3209,6 +3289,7 @@ class App(ctk.CTk):
         self._update_generated_buttons()
 
     def _on_close(self):
+        self._persist_ui_settings()
         self._cancel_event.set()
         self._stop_playback()
         self._cleanup_batch()
@@ -3218,6 +3299,20 @@ class App(ctk.CTk):
         except OSError:
             pass
         self.destroy()
+
+    def _persist_ui_settings(self):
+        """Remember voice, sliders, and UI language between runs."""
+        try:
+            self._settings["ui_language"] = self._language
+            self._settings["voice"] = self._selected_voice()
+            self._settings["voice_lang"] = self._selected_lang
+            self._settings["voice_gender"] = self._selected_gender
+            self._settings["rate"] = int(self._rate_var.get())
+            self._settings["volume"] = int(self._volume_var.get())
+            self._settings["pitch"] = int(self._pitch_var.get())
+        except Exception:
+            return
+        self._save_settings()
 
 
 def main():
