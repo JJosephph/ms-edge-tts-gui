@@ -17,6 +17,7 @@
   <a href="#中文说明">中文说明</a> ·
   <a href="#english-guide">English guide</a> ·
   <a href="#downloads">Downloads</a> ·
+  <a href="#请作者喝杯咖啡">支持作者</a> ·
   <a href="#network-and-proxy">Network &amp; proxy</a> ·
   <a href="#build-and-release">Build</a>
 </p>
@@ -39,7 +40,7 @@
 
 **Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
-- **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。
+- **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。播放中“试听”按钮会变成醒目的红色「■ 停止播放」，再点一次即可停止，音频播放结束也会自动还原。
 - **三种工作模式**：普通模式直接读取输入框全文；逐页模式按 `[分页]` 标记生成一页一个音频；逐行模式按每个非空行生成一个音频。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
 - **时间轴 JSON + 试听高亮**：主界面勾选后，保存/下载时自动打包 ZIP（内含 MP3 与同名 `.timeline.json`，每句起止秒数）；试听时正在朗读的句子会在文章中实时高亮。
@@ -59,14 +60,10 @@
 ### 中文界面预览
 
 <p align="center">
-  <img src="assets/ui-v141-normal.png" alt="v1.4.1 普通模式：输入框直接生成全文音频，支持句末停顿指令" width="900">
+  <img src="assets/ui-v154-normal.png" alt="v1.5.4 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
 </p>
 <p align="center">
-  <sub>普通模式：不要求分页，直接把左侧输入框的完整文稿生成一个音频；右侧可设置句间停顿、SRT 字幕和时间轴。</sub>
-</p>
-
-<p align="center">
-  <sub>当前版本主界面截图：普通模式默认直接生成一个音频；切换到逐页或逐行模式后，可导入示例 TXT 并批量导出。</sub>
+  <sub>v1.5.4 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
 </p>
 
 ### 亮点功能：时间轴 JSON + 试听逐句高亮
@@ -78,8 +75,13 @@
 - **精准且零额外合成**：MP3 与时间轴在同一次请求中生成，时间轴直接使用微软 TTS 返回的句级边界，**不需要再次合成**，纯本地保存、完全免费、无需 API Key。
 
 <p align="center">
-  <img src="assets/ui-timeline-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="540">
-  <img src="assets/ui-timeline-highlight.png" alt="试听逐句高亮演示" width="540">
+  <img src="assets/ui-v154-highlight.png" alt="试听逐句高亮：正在朗读的句子在文章中实时点亮" width="900">
+</p>
+<p align="center">
+  <sub>试听逐句高亮：播放时正在朗读的句子会实时点亮，同时“试听”按钮变成红色「■ 停止播放」。</sub>
+</p>
+<p align="center">
+  <img src="assets/ui-v154-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="600">
 </p>
 
 `.timeline.json` 内容示例：
@@ -116,6 +118,13 @@
 
 `[分页]` 不会被朗读。没有显式标记时，文本中的空行块也可以作为页面。每页支持备注，备注不会朗读，会写入 `pages.json`。点击「**逐页配音**」后，每页生成一个 MP3，最后可导出 ZIP。
 
+<p align="center">
+  <img src="assets/ui-v154-page.png" alt="v1.5.4 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
+</p>
+<p align="center">
+  <sub>逐页模式：左上角切换「逐页模式」，导入 txt / md / docx / pdf 后逐页核对文字与备注，再点击「逐页配音」批量生成。</sub>
+</p>
+
 #### 3. 逐行模式
 
 适合视频解说、短句旁白和批量字幕。可以导入 TXT，也可以直接粘贴文本后点击「**按行准备**」：每个非空行生成一个独立音频，空行自动忽略。
@@ -127,6 +136,31 @@
 ```
 
 点击「**逐行配音**」后，软件按行顺序合成，完成后保存为 ZIP，包含 `line_001.mp3`、`line_002.mp3` 等音频以及 `lines.json`。打开「查看结果」后，可切换“当前音频 / 全部字幕”，在同一行编辑文字、查看时间轴、试听、拖动进度和重新生成；全部确认后可直接导出最终 ZIP。逐页和逐行模式都提供「**示例文件**」按钮。
+
+<p align="center">
+  <img src="assets/ui-v154-line.png" alt="v1.5.4 逐行模式：每个非空行生成一个独立音频" width="900">
+</p>
+<p align="center">
+  <sub>逐行模式：粘贴文本后点击「按行准备」（或直接导入文件），每个非空行对应一个音频，可逐行翻页核对。</sub>
+</p>
+
+### 字幕与「查看结果」预览
+
+生成完成后点击主界面的「**查看结果**」，可以在同一个窗口里完成预览、校对和导出，适合批量配音的最后检查：
+
+- **试听 / 停止**：每一行都有独立的「试听」按钮，播放时会变成红色「**停止**」，再点一次即停止；正在播放的那一行会高亮显示。
+- **可拖动的进度条**：每行显示 `已播放 / 总时长`（精确到毫秒），绿色滑块可以直接拖动跳转到任意位置，行末静音的时长也计算在内。
+- **字幕文本 + 时间轴**：中间列显示每个音频的句级时间轴（起始 / 结束秒数 + 该句字幕文本），与「生成 SRT 字幕」导出的内容一致，方便逐句核对。
+- **修改后重新生成**：左侧文本框可以直接编辑旁白文字，点「重新生成」只重做这一行；也可以「全部重新生成」。
+- **当前音频 / 全部字幕**：顶部开关可在“只看当前一条”和“查看全部条目”之间切换，批量结果一目了然。
+- **导出最终 ZIP**：确认无误后点「导出最终 ZIP」，把音频、SRT 字幕和时间轴 JSON 一起打包保存。
+
+<p align="center">
+  <img src="assets/ui-v154-result.png" alt="v1.5.4 查看结果：试听、字幕时间轴、拖动进度与逐行重新生成" width="900">
+</p>
+<p align="center">
+  <sub>「查看结果」· 全部字幕视图：编号、字幕文本、时间轴、试听 / 重新生成、可拖动进度条一屏完成校对。</sub>
+</p>
 
 ### 句间停顿与字幕
 
@@ -152,6 +186,19 @@ lines_archive.zip
 3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，点击“生成音频”合成一次；之后点“试听”播放，或点“保存下载”导出 MP3，全程无需重复合成。
 4. 安装包会标明“免费 · 开源（MIT License）· 开发者 WangYufan”，支持从 Windows“设置 → 应用”或安装目录中的 `unins000.exe` 卸载。
 
+### 请作者喝杯咖啡
+
+这个工具完全免费、开源（MIT License），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请作者喝一杯咖啡，支持项目继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
+
+<p align="center">
+  <img src="assets/donate-wechat-pay.jpg" alt="微信支付收款码：扫码请作者喝一杯咖啡" width="320">
+</p>
+<p align="center">
+  <sub>微信扫码 · 金额随意 · 感谢支持</sub>
+</p>
+
+> English: This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code above. The project stays free either way - a Star also helps a lot.
+
 ---
 
 ## English Guide
@@ -164,15 +211,45 @@ The project is designed as a general-purpose open-source tool with three focused
 ## Interface Preview
 
 <p align="center">
-  <img src="assets/ui-v141-normal.png" alt="v1.4.1 interface preview" width="900">
+  <img src="assets/ui-v154-normal.png" alt="v1.5.4 interface preview" width="900">
 </p>
 
 <p align="center">
-  <sub>English UI · Dark theme · Normal mode composer with sentence pause, SRT, and timeline controls</sub>
+  <sub>v1.5.4 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
+</p>
+
+## Work Modes
+
+<p align="center">
+  <img src="assets/ui-v154-page.png" alt="v1.5.4 Page mode: one audio file per page" width="900">
+</p>
+<p align="center">
+  <sub>Page mode · import txt / md / docx / pdf, verify each page and its note, then dub every page into its own MP3.</sub>
 </p>
 
 <p align="center">
-  <sub>Current release preview · switch to Page or Line mode for import, review, and batch export.</sub>
+  <img src="assets/ui-v154-line.png" alt="v1.5.4 Line mode: one audio file per non-empty line" width="900">
+</p>
+<p align="center">
+  <sub>Line mode · every non-empty line becomes one audio file, ready for narration, explainer videos, and batch subtitles.</sub>
+</p>
+
+## Subtitles and the Result Viewer
+
+After generation, click **Review result** on the main window to preview, proof-read, and export from a single dialog:
+
+- **Play / Stop per row** — each item has its own Play button that turns into a red **Stop** button while it is playing, and the row being played is highlighted;
+- **Draggable progress bar** — every row shows elapsed / total time down to the millisecond, and the green slider seeks anywhere, including line-end silence;
+- **Subtitle text + timeline** — the middle column lists each sentence of that audio with its start / end seconds, exactly what the SRT export contains;
+- **Edit and regenerate** — fix the narration text and regenerate only that row, or regenerate the whole batch;
+- **Current / all items** — the switch at the top toggles between the current item and the full batch list;
+- **Export final ZIP** — one click bundles MP3 files, SRT subtitles, and timeline JSON.
+
+<p align="center">
+  <img src="assets/ui-v154-result.png" alt="v1.5.4 Review result window: play, subtitles, timeline, seeking, regenerate" width="900">
+</p>
+<p align="center">
+  <sub>The result viewer in "all items" mode: number, subtitle text, timeline, play / regenerate, and a draggable progress bar.</sub>
 </p>
 
 ## Features
@@ -182,7 +259,7 @@ The project is designed as a general-purpose open-source tool with three focused
 | **Text to MP3** | Paste Markdown, plain text, or HTML-derived text and export a full MP3 file. |
 | **Three work modes** | **Normal** reads the composer text as one audio file. **Page** imports `txt / md / docx / pdf`, splits on a standalone `[分页]` marker (or blank-line blocks when no marker is present), and creates one audio file per page. **Line** imports a file or prepared text and creates one audio file for every non-empty line. |
 | **Batch page / line export** | Page and line modes show ordered progress and export numbered MP3 files plus `pages.json` or `lines.json`; optional SRT, timeline JSON, and source notes are included with the matching item. A downloadable example TXT is available in both batch modes. |
-| **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. |
+| **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. While playing, the button turns into a red **Stop** button so the state is always obvious; it restores itself when the audio ends. |
 | **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
 | **Multi-level voice picker** | Voices are fetched once and grouped locally into **Language → Gender → Voice** (built-in grouping engine) — no more scrolling a giant list. Male/female voices are rich across hundreds of languages; Chinese, Cantonese, English and more all sound natural, never robotic. |
 | **Original workflow compatibility** | Default settings mirror the existing RPA workflow: `en-US-AndrewMultilingualNeural`, rate `+0%`, volume `+0%`, pitch `+0Hz`. |
@@ -192,7 +269,8 @@ The project is designed as a general-purpose open-source tool with three focused
 | **Restore defaults** | The voice-deck button resets voice to `en-US-AndrewMultilingualNeural` and rate/volume/pitch to `+0%`/`+0%`/`+0Hz` in one click. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
 | **Network protection** | Checks Edge TTS service availability and detects proxy environment variables before generation. |
-| **Stall recovery** | If audio stops arriving, offers **Keep waiting**, **Retry**, or **Cancel** with a network/proxy explanation. |
+| **Stall recovery** | If audio stops arriving, the app first retries automatically with backoff (up to 2 silent retries per item) and only then offers **Keep waiting**, **Retry**, or **Cancel** with a network/proxy explanation. |
+| **Result viewer + subtitles** | A batch review window with per-row Play / Stop, draggable millisecond progress, sentence-level subtitles and timeline, per-row text editing and regeneration, and final ZIP export. |
 | **Bilingual interface** | Toggle the desktop UI between **中文** and **English** at any time. English articles and international voices are fully supported. |
 | **Day / night themes** | Switch between a bright reading-friendly theme and a focused dark workspace. |
 | **Preview cache control** | Choose a preview cache folder, open it, or clear it immediately. Only one temporary preview MP3 is reused and it is deleted when the app closes. |
@@ -206,8 +284,13 @@ The feature we are most proud of — enable the **Timeline JSON + highlight** to
 - **Precise with no extra synthesis**: the MP3 and timeline are produced in the same request, using sentence-boundary metadata returned directly by Microsoft TTS. **No re-rendering** is needed; files are saved locally, free, with no API key.
 
 <p align="center">
-  <img src="assets/ui-timeline-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="540">
-  <img src="assets/ui-timeline-highlight.png" alt="Live sentence highlight demo" width="540">
+  <img src="assets/ui-v154-highlight.png" alt="Live sentence highlight while playing, with the red Stop button" width="900">
+</p>
+<p align="center">
+  <sub>Live sentence highlight: the sentence being read lights up in the article, and the Play button becomes a red Stop button.</sub>
+</p>
+<p align="center">
+  <img src="assets/ui-v154-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="600">
 </p>
 
 Example `.timeline.json`:
@@ -274,7 +357,8 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 5. In **Page** mode, click **Import File**, choose `txt / md / docx / pdf`, review pages, and use **Dub All Pages** to synthesize one MP3 per page. A standalone `[分页]` line is the explicit page separator; the marker is not spoken.
 6. In **Line** mode, import a TXT or paste prepared text, then choose **Prepare Lines**. Every non-empty line becomes one item; click **Dub All Lines** to synthesize `line_001.mp3`, `line_002.mp3`, and so on.
 7. Enable **Generate SRT subtitles** when you want one subtitle cue per sentence. Page and line batches can be saved as a ZIP with the numbered MP3 files, matching SRT/timeline files, and `pages.json` or `lines.json`.
-8. After generation, click **Play** to listen or **Save Audio** to export. Watch the status line and progress bar during generation; the bar stays at 100% when done.
+8. After generation, click **Play** to listen (the button turns into a red **Stop** while playing) or **Save Audio** to export. Watch the status line and progress bar during generation; the bar stays at 100% when done.
+9. In Page or Line mode, open **Review result** to check every item: per-row Play / Stop, draggable progress with millisecond timestamps, sentence-level subtitles, per-row text edits with **Regenerate**, and a final **Export final ZIP** for the whole batch.
 
 ## Network and Proxy
 
@@ -379,6 +463,17 @@ git push origin v1.4.1
 ## Contributing
 
 Issues, feature requests, and pull requests are welcome. If this project helps you, please consider giving it a **Star** on GitHub—it makes the project easier for other users to discover.
+
+## Support the Author
+
+This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
+
+<p align="center">
+  <img src="assets/donate-wechat-pay.jpg" alt="WeChat Pay QR code - buy the author a coffee" width="320">
+</p>
+<p align="center">
+  <sub>Scan with WeChat · any amount · thank you for supporting the project</sub>
+</p>
 
 ## License
 

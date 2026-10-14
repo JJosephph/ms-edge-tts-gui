@@ -22,6 +22,35 @@ class _FailingCommunicate:
         raise RuntimeError("simulated receive timeout")
 
 
+class _SilentCommunicate:
+    """连接建立后没有任何数据返回，模拟服务端限流。"""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def stream(self):
+        if False:
+            yield None
+        await asyncio.sleep(30)
+        yield {"type": "audio", "data": b"never"}
+
+
+class _SuccessfulCommunicate:
+    """一次成功的最小合成：一句边界 + 一段音频数据。"""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def stream(self):
+        yield {
+            "type": "SentenceBoundary",
+            "text": "Hello world.",
+            "offset": 0,
+            "duration": 10_000_000,
+        }
+        yield {"type": "audio", "data": b"\xff\xfb\x90\x00" * 64}
+
+
 class _ForbiddenCommunicate:
     def __init__(self, *args, **kwargs):
         pass
@@ -92,7 +121,9 @@ class StallHandlingTests(unittest.TestCase):
             output = Path(directory) / "output.mp3"
             with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
                 tts_engine,
+                STALL_AUTO_RETRIES=0,
                 STALL_TIMEOUT=0.005,
+                STALL_FIRST_AUDIO_TIMEOUT=0.005,
                 STALL_WAIT_GRACE=0.06,
                 STALL_SILENT_POLL=0.005,
                 RECEIVE_TIMEOUT=1,
@@ -116,7 +147,9 @@ class StallHandlingTests(unittest.TestCase):
             output = Path(directory) / "output.mp3"
             with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
                 tts_engine,
+                STALL_AUTO_RETRIES=0,
                 STALL_TIMEOUT=0.005,
+                STALL_FIRST_AUDIO_TIMEOUT=0.005,
                 STALL_WAIT_GRACE=0.06,
                 STALL_SILENT_POLL=0.005,
                 RECEIVE_TIMEOUT=1,
@@ -127,6 +160,63 @@ class StallHandlingTests(unittest.TestCase):
 
         self.assertEqual(outcome, "retry")
         self.assertEqual(controller.calls, 1)
+
+    def test_transient_failure_auto_retries_before_prompting(self):
+        controller = _RecordingController("cancel")
+        engine = TTSEngine(controller=controller)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.mp3"
+            with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
+                tts_engine,
+                STALL_AUTO_RETRIES=1,
+                RECEIVE_TIMEOUT=1,
+            ):
+                first = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
+                second = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
+
+        # 第一次失败静默自动重试，不再打扰用户；额度用完后才弹窗。
+        self.assertEqual(first, "retry")
+        self.assertEqual(second, "cancel")
+        self.assertEqual(controller.calls, 1)
+
+    def test_silent_stream_auto_retries_before_prompting(self):
+        controller = _RecordingController("cancel")
+        engine = TTSEngine(controller=controller)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.mp3"
+            with patch("tts_engine.edge_tts.Communicate", _SilentCommunicate), patch.multiple(
+                tts_engine,
+                STALL_AUTO_RETRIES=1,
+                STALL_TIMEOUT=0.01,
+                STALL_FIRST_AUDIO_TIMEOUT=0.01,
+                RECEIVE_TIMEOUT=1,
+            ):
+                # 连上后一直没有数据：先自动重试一次，不弹窗。
+                first = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
+                self.assertEqual(first, "retry")
+                self.assertEqual(controller.calls, 0)
+                # 自动重试额度用完后才询问用户。
+                second = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
+
+        self.assertEqual(second, "cancel")
+        self.assertEqual(controller.calls, 1)
+
+    def test_recreates_missing_output_directory_before_streaming(self):
+        """缓存目录被清理后，生成应该自动补建目录而不是报错。"""
+        engine = TTSEngine()
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "removed-cache" / "preview.mp3"
+            self.assertFalse(output.parent.exists())
+            with patch("tts_engine.edge_tts.Communicate", _SuccessfulCommunicate):
+                outcome = asyncio.run(
+                    engine._stream_once("hello world", output, TTSConfig())
+                )
+
+            self.assertEqual(outcome, "done")
+            self.assertTrue(output.exists())
 
 
 if __name__ == "__main__":

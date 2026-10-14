@@ -52,7 +52,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.5.3"
+APP_VERSION = "1.5.4"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -62,6 +62,8 @@ UI_FONT_FALLBACKS = ("Microsoft YaHei", "SimHei", "Arial")
 SETTINGS_DIR = Path(os.environ.get("APPDATA", Path.home())) / "EdgeTTSGui"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 PREVIEW_FILENAME = "edge_tts_preview.mp3"
+BATCH_ITEM_DELAY = 1.5        # 批量配音每项之间的间隔，避免连续请求被服务端限流
+BATCH_RETRY_COOLDOWN = 8.0    # 一轮失败后整体重试前的冷却时间
 
 THEMES = {
     "dark": {
@@ -69,7 +71,8 @@ THEMES = {
         "card": "#14223A", "card_raised": "#182944", "border": "#263B5C",
         "text": "#F2F6FF", "muted": "#91A4C3", "primary": "#5A8CFF",
         "primary_hover": "#4777E6", "accent": "#73D7FF", "success": "#61D69C",
-        "warning": "#F6C66C", "danger": "#F47D92", "star": "#4A3B16",
+        "warning": "#F6C66C", "danger": "#F47D92", "danger_hover": "#D9556D",
+        "star": "#4A3B16",
         "star_hover": "#5D4B1D", "field": "#0A1322", "log": "#09121F",
     },
     "light": {
@@ -77,7 +80,8 @@ THEMES = {
         "card": "#FFFFFF", "card_raised": "#F7FAFF", "border": "#CAD8EB",
         "text": "#17233A", "muted": "#61718D", "primary": "#356FEB",
         "primary_hover": "#285BCA", "accent": "#0B89C8", "success": "#168B57",
-        "warning": "#A66A00", "danger": "#C33D56", "star": "#FFF3D6",
+        "warning": "#A66A00", "danger": "#C33D56", "danger_hover": "#A82F47",
+        "star": "#FFF3D6",
         "star_hover": "#F8E1A7", "field": "#F8FBFF", "log": "#F7FAFE",
     },
 }
@@ -206,6 +210,8 @@ class App(ctk.CTk):
         self._punctuation_checks = {}
         self._timeline_check = None
         self._srt_check = None
+        self._play_button_active = False
+        self._play_poll_after = None
 
         self._build_ui()
         self._bind_events()
@@ -317,6 +323,7 @@ class App(ctk.CTk):
         "ready": {"zh": "就绪", "en": "Ready"},
         "generate": {"zh": "生成音频", "en": "Generate Audio"},
         "play": {"zh": "▶ 试听", "en": "▶ Play"},
+        "play_stop": {"zh": "■ 停止播放", "en": "■ Stop"},
         "save": {"zh": "保存下载", "en": "Save Audio"},
         "generated_ok": {"zh": "已生成 ✔ 可试听 / 保存", "en": "Generated ✔ Play or save"},
         "result_preview": {"zh": "查看结果", "en": "Review result"},
@@ -550,9 +557,17 @@ class App(ctk.CTk):
             self.log("Generated audio cache cleared." if is_english else "生成音频缓存已清理。")
             messagebox.showinfo(self._app_name(), "Generated audio cache cleared." if is_english else "生成音频缓存已清理。")
 
+        def open_folder():
+            # 目录可能已被清理掉，打开前先补建，避免报错。
+            try:
+                os.makedirs(self._preview_dir, exist_ok=True)
+                os.startfile(self._preview_dir)
+            except OSError as exc:
+                messagebox.showerror(self._app_name(), str(exc))
+
         buttons = ctk.CTkFrame(dialog, fg_color="transparent")
         buttons.grid(row=3, column=0, sticky="e", padx=22, pady=(20, 8))
-        ctk.CTkButton(buttons, text="Open folder" if is_english else "打开目录", width=104, fg_color="#3a4358", hover_color="#4a546c", command=lambda: os.startfile(self._preview_dir)).pack(side="left", padx=4)
+        ctk.CTkButton(buttons, text="Open folder" if is_english else "打开目录", width=104, fg_color="#3a4358", hover_color="#4a546c", command=open_folder).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Clear generated audio cache" if is_english else "清理生成缓存", width=150, fg_color="#3a4358", hover_color="#4a546c", command=clear_preview).pack(side="left", padx=4)
         ctk.CTkButton(buttons, text="Save" if is_english else "保存", width=86, command=save_directory).pack(side="left", padx=4)
 
@@ -1931,14 +1946,30 @@ class App(ctk.CTk):
         stem = "line" if is_line else "page"
         results = []
         canceled = False
-        for pos, page in enumerate(pages, start=1):
+
+        def pace(seconds: float) -> bool:
+            """给服务端留出冷却时间；返回 False 表示用户取消了任务。"""
+            deadline = time.perf_counter() + max(0.0, seconds)
+            while True:
+                if self._cancel_event.is_set():
+                    return False
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
+                    return True
+                time.sleep(min(0.25, remaining))
+
+        failed: list[tuple[int, Page]] = []
+
+        def generate_item(pos, page) -> bool:
+            """生成单项；返回 False 表示失败（取消时同时设置 canceled）。"""
+            nonlocal canceled
             if self._cancel_event.is_set():
                 canceled = True
-                break
+                return False
             text = normalize_for_tts(clean_text(page.text))
             if not text.strip():
                 self._ui_q.put(("log", f"[{log_tag}] 第 {pos}/{total} {unit}无可用文字，已跳过。"))
-                continue
+                return True
             output_path = os.path.join(batch_dir, f"{stem}_{pos:03d}.mp3")
             controller = self._make_controller()
             engine = TTSEngine(
@@ -1952,22 +1983,48 @@ class App(ctk.CTk):
             result = engine.generate(text, output_path, cfg)
             if self._cancel_event.is_set():
                 canceled = True
+                return False
+            if result.get("status") != "done":
+                self._ui_q.put((
+                    "log",
+                    f"[{log_tag}] 第 {pos}/{total} {unit}生成失败：{result.get('error', '未知错误')}",
+                ))
+                return False
+            size_kb = os.path.getsize(output_path) / 1024 if os.path.exists(output_path) else 0
+            self._ui_q.put(("log", f"[{log_tag}] 第 {pos}/{total} {unit}完成（{size_kb:.0f} KB）。"))
+            results.append({
+                "index": page.index,
+                "page": pos,
+                "title": page.title,
+                "text": text,
+                "note": page.note,
+                "audio": output_path,
+                "timeline": getattr(engine, "timeline", None),
+            })
+            return True
+
+        for pos, page in enumerate(pages, start=1):
+            if not generate_item(pos, page):
+                if canceled:
+                    break
+                # 服务端短时限流时，失败项留到本轮结束后统一再试一次。
+                failed.append((pos, page))
+            if not pace(BATCH_ITEM_DELAY):
+                canceled = True
                 break
-            if result.get("status") == "done":
-                size_kb = os.path.getsize(output_path) / 1024 if os.path.exists(output_path) else 0
-                self._ui_q.put(("log", f"[{log_tag}] 第 {pos}/{total} {unit}完成（{size_kb:.0f} KB）。"))
-                results.append({
-                    "index": page.index,
-                    "page": pos,
-                    "title": page.title,
-                    "text": text,
-                    "note": page.note,
-                    "audio": output_path,
-                    "timeline": getattr(engine, "timeline", None),
-                })
-            else:
-                error = result.get("error", "未知错误")
-                self._ui_q.put(("log", f"[{log_tag}] 第 {pos}/{total} {unit}生成失败：{error}"))
+        if failed and not canceled:
+            self._ui_q.put((
+                "log",
+                f"[{log_tag}] 等待 {BATCH_RETRY_COOLDOWN:g} 秒后重试失败项"
+                f"（共 {len(failed)} {unit}）…",
+            ))
+            if pace(BATCH_RETRY_COOLDOWN):
+                for pos, page in failed:
+                    if not generate_item(pos, page) and canceled:
+                        break
+                    if not pace(BATCH_ITEM_DELAY):
+                        canceled = True
+                        break
         self._ui_q.put(("batch_done", {"results": results, "canceled": canceled, "mode": batch_mode}))
 
     def _on_batch_done(self, payload):
@@ -2069,6 +2126,8 @@ class App(ctk.CTk):
             return
         self.log("[试听] 开始播放已生成的音频…")
         self._play_audio(target)
+        self._set_play_button_state(True)
+        self._schedule_playback_poll()
         if self._timeline_enabled:
             timeline = page_entry.get("timeline") if page_entry else self._generated_timeline
             if timeline:
@@ -2298,6 +2357,28 @@ class App(ctk.CTk):
                 end = max([float(item.get("end", 0)) for item in sentences] or [0.0])
                 lines.append(f"{end:07.3f} - {end + padding:07.3f}  （行末静音）")
             return "\n".join(lines) or self._t("result_no_subtitles")
+        def set_row_button(state, playing):
+            """结果表里的试听按钮同样要在播放时显示为「停止」。"""
+            button = state.get("button")
+            if button is None:
+                return
+            try:
+                if playing:
+                    button.configure(
+                        text=self._t("result_stop"),
+                        fg_color=self._c("danger"),
+                        hover_color=self._c("danger_hover"),
+                        text_color="#FFFFFF",
+                    )
+                else:
+                    button.configure(
+                        text=self._t("result_play"),
+                        fg_color=self._c("primary"),
+                        hover_color=self._c("primary_hover"),
+                        text_color="#FFFFFF",
+                    )
+            except Exception:  # noqa: BLE001 - 控件销毁时忽略
+                pass
         def stop_playback():
             if active["after"]:
                 try:
@@ -2310,6 +2391,7 @@ class App(ctk.CTk):
                 state["progress"].set(0)
                 state["elapsed"].configure(text=format_time(0))
                 state["frame"].configure(fg_color=self._c("card"))
+                set_row_button(state, False)
         def play_row(entry, state):
             audio = entry.get("audio")
             if not audio or not os.path.exists(audio):
@@ -2321,6 +2403,16 @@ class App(ctk.CTk):
             self._play_audio(audio)
             active["page"] = entry.get("page")
             state["frame"].configure(fg_color=self._c("card_raised"))
+            set_row_button(state, True)
+            start_progress_tick(entry, state)
+        def start_progress_tick(entry, state):
+            """播放进度轮询；同一时间只保留一个，避免拖动进度时叠加。"""
+            if active["after"]:
+                try:
+                    dialog.after_cancel(active["after"])
+                except Exception:
+                    pass
+                active["after"] = None
             duration = state.get("duration") or entry_duration(entry)
             state["duration"] = duration
             state["total"].configure(text=format_time(duration))
@@ -2337,6 +2429,7 @@ class App(ctk.CTk):
                     state["elapsed"].configure(text=format_time(duration))
                     active.update(page=None, after=None)
                     state["frame"].configure(fg_color=self._c("card"))
+                    set_row_button(state, False)
             tick()
         def seek_row(entry, state, value):
             duration = state.get("duration") or entry_duration(entry)
@@ -2347,6 +2440,9 @@ class App(ctk.CTk):
                 self._stop_playback()
                 self._play_audio(entry.get("audio"))
                 active["page"] = entry.get("page")
+                state["frame"].configure(fg_color=self._c("card_raised"))
+                set_row_button(state, True)
+                start_progress_tick(entry, state)
             try:
                 if pygame.mixer.get_init(): pygame.mixer.music.set_pos(target)
             except Exception:
@@ -2407,9 +2503,11 @@ class App(ctk.CTk):
                 progress = ctk.CTkSlider(timeline_bar, from_=0, to=duration, number_of_steps=max(1, int(round(duration * 1000))), height=16, button_length=12, fg_color=self._c("field"), progress_color=self._c("success"), button_color=self._c("success"), button_hover_color=self._c("accent")); progress.grid(row=0, column=1, sticky="ew", padx=4); progress.set(0)
                 total = ctk.CTkLabel(timeline_bar, text=format_time(duration), width=78, anchor="e", text_color=self._c("muted"), font=self._font(size=10)); total.grid(row=0, column=2, sticky="e")
                 buttons = ctk.CTkFrame(actions, fg_color="transparent"); buttons.pack(fill="x")
-                state = {"frame": frame, "editor": editor, "progress": progress, "elapsed": elapsed, "total": total, "duration": duration}; row_state[entry.get("page")] = state
+                state = {"frame": frame, "editor": editor, "progress": progress, "elapsed": elapsed, "total": total, "duration": duration, "button": None}; row_state[entry.get("page")] = state
                 progress.configure(command=lambda value, e=entry, s=state: seek_row(e, s, value))
-                ctk.CTkButton(buttons, text=self._t("result_play"), width=72, height=28, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=lambda e=entry, s=state: play_row(e, s)).pack(side="left", padx=(0, 5))
+                play_button = ctk.CTkButton(buttons, text=self._t("result_play"), width=72, height=28, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF", command=lambda e=entry, s=state: play_row(e, s))
+                play_button.pack(side="left", padx=(0, 5))
+                state["button"] = play_button
                 ctk.CTkButton(buttons, text=self._t("result_regenerate"), width=88, height=28, fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("accent"), text_color=self._c("accent"), command=lambda e=entry, s=state: regenerate(e, s)).pack(side="left")
                 for widget in (frame, editor):
                     widget.bind("<Enter>", lambda _e, f=frame: f.configure(fg_color=self._c("card_raised")))
@@ -2494,6 +2592,53 @@ class App(ctk.CTk):
 
     # ============================================================ 播放
 
+    def _set_play_button_state(self, playing: bool):
+        """把「试听」按钮切换成明显的播放中 / 停止状态。
+
+        之前试听与停止共用同一个外观，播放时看不出任何变化；
+        现在播放中按钮会变成红色「■ 停止播放」，播放结束自动还原。
+        """
+        self._play_button_active = bool(playing)
+        button = getattr(self, "_btn_play", None)
+        if button is None:
+            return
+        try:
+            if playing:
+                button.configure(
+                    text=self._t("play_stop"),
+                    fg_color=self._c("danger"),
+                    hover_color=self._c("danger_hover"),
+                    text_color="#FFFFFF",
+                )
+            else:
+                button.configure(
+                    text=self._t("play"),
+                    fg_color=self._c("surface_alt"),
+                    hover_color=self._c("border"),
+                    text_color=self._c("text"),
+                )
+        except Exception:  # noqa: BLE001 - 控件销毁时忽略
+            pass
+
+    def _schedule_playback_poll(self):
+        """播放开始后轮询播放器状态，播完自动恢复按钮外观。"""
+        if self._play_poll_after is not None:
+            return
+        self._play_poll_after = self.after(250, self._poll_playback_state)
+
+    def _poll_playback_state(self):
+        self._play_poll_after = None
+        if not self._play_button_active:
+            return
+        try:
+            busy = bool(pygame.mixer.get_init() and pygame.mixer.music.get_busy())
+        except Exception:  # noqa: BLE001
+            busy = False
+        if busy:
+            self._play_poll_after = self.after(250, self._poll_playback_state)
+        else:
+            self._set_play_button_state(False)
+
     def _play_audio(self, path):
         try:
             if not pygame.mixer.get_init():
@@ -2502,6 +2647,7 @@ class App(ctk.CTk):
             pygame.mixer.music.play()
         except Exception as exc:  # noqa: BLE001
             self.log(f"[试听] 播放失败：{exc}（可改用导出功能获取音频文件）")
+            self._set_play_button_state(False)
 
     def _stop_playback(self):
         try:
@@ -2512,6 +2658,13 @@ class App(ctk.CTk):
         except Exception:  # noqa: BLE001
             pass
         self._clear_highlight()
+        self._set_play_button_state(False)
+        if self._play_poll_after is not None:
+            try:
+                self.after_cancel(self._play_poll_after)
+            except Exception:  # noqa: BLE001
+                pass
+            self._play_poll_after = None
 
     def _toggle_timeline(self):
         self._timeline_enabled = bool(self._timeline_var.get())
@@ -2900,6 +3053,12 @@ class App(ctk.CTk):
             (r"^\[网络\] 不可达，检测到代理 (.*)，可能是网络不通或代理设置不正确。$", r"[Network] Unreachable; proxy detected: \1. Check the connection or proxy configuration."),
             (r"^\[网络\] 不可达（(.*)）。生成可能很慢或失败，建议检查网络后重试。$", r"[Network] Unreachable (\1). Synthesis may be slow or fail; check your network and retry."),
             (r"^\[警告\] 生成失败：(.*)（可能是网络不通或代理设置不正确）$", r"[Warning] Synthesis failed: \1 (network or proxy may be unavailable or misconfigured)"),
+            (r"^\[提示\] 长时间没有收到新的音频数据，正在自动重试（(\d+)/(\d+)）…$", r"[Info] No new audio data for a while; auto-retrying (\1/\2)…"),
+            (r"^\[提示\] 等待期间连接中断，正在自动重试（(\d+)/(\d+)）…$", r"[Info] The connection dropped while waiting; auto-retrying (\1/\2)…"),
+            (r"^\[提示\] (.*)，正在自动重试（(\d+)/(\d+)）…$", r"[Info] \1; auto-retrying (\2/\3)…"),
+            (r"^\[提示\] 已启用不再提醒，正在自动重试。$", r"[Info] Reminders suppressed; retrying automatically."),
+            (r"^\[分页\] 等待 ([\d.]+) 秒后重试失败项（共 (\d+) 页）…$", r"[Pages] Retrying failed pages in \1 s (\2 page(s))…"),
+            (r"^\[逐行\] 等待 ([\d.]+) 秒后重试失败项（共 (\d+) 行）…$", r"[Lines] Retrying failed lines in \1 s (\2 line(s))…"),
             (r"^等待 ([\d.]+) 秒后重试…$", r"Retrying in \1 seconds…"),
             (r"^\[警告\] 生成失败：(.*)（微软语音服务拒绝了连接（403）。(.*)）$", r"[Warning] Synthesis failed: \1 (Microsoft speech service rejected the connection with HTTP 403. \2)"),
         ]

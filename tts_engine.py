@@ -26,16 +26,18 @@ from edge_tts.constants import SEC_MS_GEC_VERSION, TRUSTED_CLIENT_TOKEN, WSS_HEA
 from edge_tts.drm import DRM
 
 # ---------------------------------------------------------------- 常量
-STALL_TIMEOUT = 180            # 连续多少秒没有新音频分片 -> 首次提示卡住
+STALL_TIMEOUT = 120            # 连续多少秒没有新音频分片 -> 判定卡住
+STALL_FIRST_AUDIO_TIMEOUT = 60  # 还没收到任何数据时的等待上限（限流通常表现为连上后没数据）
 STALL_WAIT_GRACE = 600         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
 STALL_SILENT_POLL = 5          # “不再提醒”后，检查取消操作的间隔（秒）
 STALL_DECISION_TIMEOUT = 300   # 卡住后等待用户决定的最长时间（秒）
 CONNECT_TIMEOUT = 10          # edge-tts 建连超时
 RECEIVE_TIMEOUT = 1800        # edge-tts 单次接收超时（兜底，不能抢先于界面提示）
 PROBE_TIMEOUT = 6             # 网络探测超时
-MAX_RETRIES = 3               # 最大生成重试次数
-RETRY_BASE_DELAY = 2.0        # 首次自动重试前等待（秒）
-RETRY_MAX_DELAY = 5.0         # 自动重试等待上限（秒）
+STALL_AUTO_RETRIES = 2        # 卡住后先静默自动重试几次，之后才弹窗询问
+MAX_RETRIES = 4               # 最大生成重试次数
+RETRY_BASE_DELAY = 3.0        # 首次自动重试前等待（秒）
+RETRY_MAX_DELAY = 15.0        # 自动重试等待上限（秒）
 PROGRESS_REPORT_INTERVAL = 0.25
 DEFAULT_DIRECTIVE_PAUSE_MS = 300
 MAX_DIRECTIVE_PAUSE_MS = 10000
@@ -651,6 +653,7 @@ class TTSEngine:
         self.timeline: Optional[dict] = None
         self.error_message = ""
         self._suppress_stall_prompts = False
+        self._auto_stall_retries = 0
 
     # ---------------- 对外入口 ----------------
 
@@ -662,6 +665,7 @@ class TTSEngine:
 
     async def _generate_async(self, text: str, output_path, cfg: TTSConfig) -> dict:
         attempts = 0
+        self._auto_stall_retries = 0
         while True:
             attempts += 1
             self.on_log(f"开始第 {attempts} 次生成（语音：{cfg.voice}）")
@@ -695,6 +699,11 @@ class TTSEngine:
     async def _stream_once(self, text: str, output_path, cfg: TTSConfig) -> str:
         """执行一次流式生成，返回 'done' | 'cancel' | 'retry'。"""
         temp_path = self._temp_path(output_path)
+        # 缓存目录可能在设置后被清理/删除（临时目录清理、移动盘拔插等），
+        # 这里先补建目录，避免写 .partial 文件时报“找不到路径”。
+        parent_dir = os.path.dirname(os.path.abspath(temp_path))
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
         self._safe_unlink(temp_path)
         self.error_message = ""
         self.sentence_boundaries = []
@@ -728,6 +737,7 @@ class TTSEngine:
             next_chunk = None
             wait_deadline = None
             silent_waiting = False
+            received_any = False
             with open(temp_path, "wb") as audio_file:
                 while True:
                     if self.cancel_event.is_set():
@@ -741,7 +751,11 @@ class TTSEngine:
                     elif wait_deadline is not None:
                         wait_window = max(0.0, wait_deadline - time.perf_counter())
                     else:
-                        wait_window = STALL_TIMEOUT
+                        # 一个字都还没收到时更快判定卡住：限流通常表现为
+                        # 连接建立后长时间没有任何数据。
+                        wait_window = (
+                            STALL_TIMEOUT if received_any else STALL_FIRST_AUDIO_TIMEOUT
+                        )
                     try:
                         done, _pending = await asyncio.wait(
                             {next_chunk}, timeout=wait_window
@@ -767,6 +781,12 @@ class TTSEngine:
                                 )
                                 return "retry"
                             if wait_deadline is not None:
+                                if self._consume_auto_stall_retry(
+                                    "等待期间连接中断"
+                                ):
+                                    next_chunk = None
+                                    self._safe_unlink(temp_path)
+                                    return "retry"
                                 await self._wait_with_cancel(
                                     max(0.0, wait_deadline - time.perf_counter())
                                 )
@@ -784,13 +804,20 @@ class TTSEngine:
                         next_chunk = None
                         wait_deadline = None
                         silent_waiting = False
+                        received_any = True
                     else:
                         # 超时仍未收到新数据
                         if silent_waiting:
                             # 用户已选择“不再提醒”：静默等待，同时保留取消响应。
                             continue
+                        if self._consume_auto_stall_retry(
+                            "长时间没有收到新的音频数据"
+                        ):
+                            next_chunk.cancel()
+                            self._safe_unlink(temp_path)
+                            return "retry"
                         decision = await self._ask_stall(
-                            "生成似乎卡住了：长时间没有收到新的音频数据。"
+                            "生成似乎卡住了：自动重试后仍长时间没有收到新的音频数据。"
                             "可能是网络不通或代理设置不正确。要重试吗？"
                         )
                         if decision == "cancel":
@@ -890,6 +917,8 @@ class TTSEngine:
             if self._suppress_stall_prompts:
                 self.on_log("[提示] 已启用不再提醒，正在自动重试。")
                 return "retry"
+            if self._consume_auto_stall_retry(hint):
+                return "retry"
             decision = await self._ask_stall(f"{hint} 是否重试？")
             if decision == "cancel":
                 return "cancel"
@@ -898,6 +927,21 @@ class TTSEngine:
             return "retry"
 
     # ---------------- 工具 ----------------
+
+    def _consume_auto_stall_retry(self, reason: str) -> bool:
+        """卡住 / 中断后先静默自动重试几次，用完额度才弹窗询问。
+
+        用户实测批量生成时服务端会短时限流：重试基本都能成功，
+        因此自动重试比每次都弹窗更省事。
+        """
+        if self._auto_stall_retries >= STALL_AUTO_RETRIES:
+            return False
+        self._auto_stall_retries += 1
+        self.on_log(
+            f"[提示] {reason}，正在自动重试"
+            f"（{self._auto_stall_retries}/{STALL_AUTO_RETRIES}）…"
+        )
+        return True
 
     async def _ask_stall(self, message: str) -> str:
         if self.controller is None:
