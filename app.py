@@ -55,7 +55,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -185,6 +185,9 @@ class App(ctk.CTk):
         self._generated_text: str | None = None
         self._timeline_enabled = bool(self._settings.get("timeline_json", False))
         self._srt_enabled = bool(self._settings.get("srt_subtitles", False))
+        self._srt_fill_line_pause = bool(
+            self._settings.get("srt_fill_line_pause", False)
+        )
         self._sentence_pause_ms = normalize_saved_pause(
             self._settings.get("sentence_pause_ms", 0)
         )
@@ -198,6 +201,7 @@ class App(ctk.CTk):
         self._generated_timeline: dict | None = None
         self._timeline_var = None
         self._srt_var = None
+        self._srt_fill_var = None
         self._pause_var = None
         self._highlight_running = False
         self._highlight_ranges: list = []
@@ -241,6 +245,8 @@ class App(ctk.CTk):
         self._punctuation_checks = {}
         self._timeline_check = None
         self._srt_check = None
+        self._srt_fill_check = None
+        self._srt_fill_hint = None
         self._play_button_active = False
         self._play_poll_after = None
 
@@ -341,6 +347,11 @@ class App(ctk.CTk):
         "pause_inserted": {"zh": "已插入 {count} 个句末停顿指令。", "en": "Inserted {count} end-of-sentence pause marker(s)."},
         "pause_invalid": {"zh": f"请输入 0，或 {MIN_PAUSE_MS} 到 {MAX_PAUSE_MS} 之间的整数毫秒。", "en": f"Enter 0 or an integer from {MIN_PAUSE_MS} to {MAX_PAUSE_MS} milliseconds."},
         "srt_subtitles": {"zh": "生成 SRT 字幕", "en": "Generate SRT subtitles"},
+        "srt_fill_line_pause": {"zh": "填充行末停顿（字幕无空隙）", "en": "Fill line-end pause (gapless subtitles)"},
+        "srt_fill_line_pause_hint": {
+            "zh": "只影响 SRT 文本：上一行字幕延续到下一行开始，音频与时间轴 JSON 保持真实停顿。",
+            "en": "Only the SRT text changes: each cue runs until the next one starts while the audio and timeline JSON keep the real pauses.",
+        },
 
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
         "voices_load_error": {"zh": "语音列表加载失败，请检查网络后点 ↻ 重试", "en": "Could not load the voice list - check network and click ↻ to retry"},
@@ -984,7 +995,24 @@ class App(ctk.CTk):
 
         self._srt_var = tk.BooleanVar(value=self._srt_enabled)
         self._srt_check = ctk.CTkCheckBox(mode_settings, text=self._t("srt_subtitles"), variable=self._srt_var, command=self._toggle_srt, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
-        self._srt_check.grid(row=5, column=0, sticky="w", padx=14, pady=(4, 10))
+        self._srt_check.grid(row=5, column=0, sticky="w", padx=14, pady=(4, 4))
+        self._srt_fill_var = tk.BooleanVar(value=self._srt_fill_line_pause)
+        self._srt_fill_check = ctk.CTkCheckBox(mode_settings, text=self._t("srt_fill_line_pause"), variable=self._srt_fill_var, command=self._toggle_srt_fill, font=self._font(size=11), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=18, checkbox_height=18, border_width=2)
+        self._srt_fill_check.grid(row=6, column=0, sticky="w", padx=32, pady=(0, 3))
+        self._srt_fill_hint = ctk.CTkLabel(
+            mode_settings,
+            text=self._t("srt_fill_line_pause_hint"),
+            text_color=self._c("muted"),
+            anchor="w",
+            justify="left",
+            wraplength=280,
+            font=self._font(size=10),
+        )
+        self._srt_fill_hint.grid(row=7, column=0, sticky="ew", padx=(32, 14), pady=(0, 10))
+        # Keep the hint wrapped inside the panel instead of letting a fixed
+        # wraplength push text past the frame edge on narrow windows.
+        mode_settings.bind("<Configure>", self._on_mode_settings_resize, add="+")
+        self._update_srt_fill_visibility()
 
         parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
         parameters.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 5))
@@ -1604,6 +1632,9 @@ class App(ctk.CTk):
         self._line_pause_check.configure(text=self._t("line_pause_enable"))
         self._timeline_check.configure(text=self._t("timeline"))
         self._srt_check.configure(text=self._t("srt_subtitles"))
+        self._srt_fill_check.configure(text=self._t("srt_fill_line_pause"))
+        self._srt_fill_hint.configure(text=self._t("srt_fill_line_pause_hint"))
+        self._update_srt_fill_visibility()
 
     def _on_prepare_lines(self):
         if self._busy or self._workflow_mode != "line":
@@ -2185,7 +2216,10 @@ class App(ctk.CTk):
                         "timeline": entry.get("timeline"),
                     }
                     if self._srt_enabled:
-                        srt = timeline_to_srt(entry.get("timeline"))
+                        srt = timeline_to_srt(
+                            entry.get("timeline"),
+                            fill_gaps=self._srt_fill_line_pause,
+                        )
                         if srt:
                             item["subtitle"] = base_name + ".srt"
                             archive.writestr(item["subtitle"], srt)
@@ -2300,7 +2334,9 @@ class App(ctk.CTk):
 
         def entry_subtitles(entry):
             timeline = entry.get("timeline")
-            return timeline_to_srt(timeline) if timeline else self._t("result_no_subtitles")
+            if not timeline:
+                return self._t("result_no_subtitles")
+            return timeline_to_srt(timeline, fill_gaps=self._srt_fill_line_pause)
 
         def all_subtitles():
             blocks = []
@@ -2656,7 +2692,13 @@ class App(ctk.CTk):
                             json.dumps(self._generated_timeline, ensure_ascii=False, indent=2),
                         )
                     if self._srt_enabled:
-                        archive.writestr(base_name + ".srt", timeline_to_srt(self._generated_timeline))
+                        archive.writestr(
+                            base_name + ".srt",
+                            timeline_to_srt(
+                                self._generated_timeline,
+                                fill_gaps=self._srt_fill_line_pause,
+                            ),
+                        )
                 self.log(f"[保存] 音频与字幕/时间轴已打包：{path}")
             else:
                 shutil.copy2(self._generated_path, path)
@@ -2761,6 +2803,52 @@ class App(ctk.CTk):
         self._srt_enabled = bool(self._srt_var.get())
         self._settings["srt_subtitles"] = self._srt_enabled
         self._save_settings()
+        self._update_srt_fill_visibility()
+
+    def _toggle_srt_fill(self):
+        """Fill subtitle gaps on export without touching the generated audio."""
+        self._srt_fill_line_pause = bool(self._srt_fill_var.get())
+        self._settings["srt_fill_line_pause"] = self._srt_fill_line_pause
+        self._save_settings()
+        self.log(
+            "[字幕] 已开启行末停顿填充，导出的 SRT 时间轴不再有空隙。"
+            if self._srt_fill_line_pause
+            else "[字幕] 已关闭行末停顿填充，SRT 保持音频的真实停顿。"
+        )
+        refresh = getattr(self, "_result_preview_refresh", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:  # noqa: BLE001 - preview may already be gone
+                pass
+
+    def _update_srt_fill_visibility(self):
+        """Only offer the gap filler when a line-end pause can create a gap."""
+        visible = bool(self._line_pause_enabled) and self._workflow_mode == "line"
+        for widget in (self._srt_fill_check, self._srt_fill_hint):
+            if widget is None:
+                continue
+            if visible:
+                widget.grid()
+            else:
+                widget.grid_remove()
+
+    def _on_mode_settings_resize(self, event):
+        """Reflow the subtitle hint so its text stays inside the panel."""
+        label = getattr(self, "_srt_fill_hint", None)
+        if label is None:
+            return
+        try:
+            current = int(float(label.cget("wraplength")))
+        except (TypeError, ValueError):
+            current = 0
+        target = max(160, int(event.width) - 46)
+        if abs(current - target) <= 4:
+            return
+        try:
+            label.configure(wraplength=target)
+        except Exception:  # noqa: BLE001 - the panel may already be torn down
+            pass
 
     def _toggle_sentence_pause(self):
         self._sentence_pause_enabled = bool(self._sentence_pause_check.get())
@@ -2785,6 +2873,7 @@ class App(ctk.CTk):
         self._settings["line_pause_enabled"] = self._line_pause_enabled
         self._save_settings()
         self._set_line_pause_controls_enabled(self._line_pause_enabled)
+        self._update_srt_fill_visibility()
         self._invalidate_generated()
 
     def _set_line_pause_controls_enabled(self, enabled: bool):

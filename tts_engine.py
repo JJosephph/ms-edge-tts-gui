@@ -487,8 +487,61 @@ def merge_pause_overrides(
     return merged
 
 
-def timeline_to_srt(timeline: Optional[dict]) -> str:
-    """Convert the final sentence timeline to UTF-8 SRT text."""
+def fill_subtitle_gaps(timeline: Optional[dict]) -> Optional[dict]:
+    """Return the same cues with every waiting gap covered by the previous cue.
+
+    Subtitle files are usually imported into editors that expect a cue to stay
+    on screen until the next one starts, while an interpolated pause leaves a
+    real hole in the audio. Each cue is therefore extended to the next cue's
+    start and the final cue covers the requested tail pause. Only cue times
+    change: the audio and the timeline JSON keep the real timings.
+    """
+    if not timeline:
+        return timeline
+    entries = [dict(item) for item in timeline.get("sentences", [])]
+    if not entries:
+        return timeline
+
+    for current, following in zip(entries, entries[1:]):
+        try:
+            next_start = float(following.get("start", 0.0))
+            current_end = float(current.get("end", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if next_start > current_end:
+            current["end"] = round(next_start, 4)
+
+    # A trailing pause has no following cue to absorb it, so the last cue runs
+    # to the logical end of the audio when the timeline records one.
+    tail_end: Optional[float] = None
+    for key in ("duration", "audio_duration"):
+        try:
+            candidate = float(timeline.get(key))
+        except (TypeError, ValueError):
+            continue
+        if candidate > 0 and (tail_end is None or candidate < tail_end):
+            tail_end = candidate
+    try:
+        last_end = float(entries[-1].get("end", 0.0))
+    except (TypeError, ValueError):
+        last_end = 0.0
+    if tail_end is not None and tail_end > last_end:
+        entries[-1]["end"] = round(tail_end, 4)
+
+    filled = dict(timeline)
+    filled["sentences"] = entries
+    return filled
+
+
+def timeline_to_srt(timeline: Optional[dict], fill_gaps: bool = False) -> str:
+    """Convert the final sentence timeline to UTF-8 SRT text.
+
+    With ``fill_gaps`` the cues are laid end to end, so an imported subtitle
+    track has no holes where a sentence or line-end pause was interpolated.
+    """
+    if fill_gaps:
+        timeline = fill_subtitle_gaps(timeline)
+
     def stamp(seconds: float) -> str:
         milliseconds = max(0, round(float(seconds) * 1000))
         hours, milliseconds = divmod(milliseconds, 3_600_000)

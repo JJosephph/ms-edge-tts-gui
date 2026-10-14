@@ -10,6 +10,7 @@ from tts_engine import (
     append_audio_silence,
     audio_duration_seconds,
     build_sentence_timeline_from_word_boundaries,
+    fill_subtitle_gaps,
     insert_sentence_pause_directives,
     insert_sentence_pauses,
     line_end_sentence_indices,
@@ -113,6 +114,58 @@ class SubtitleTests(unittest.TestCase):
             "1\n00:00:00,050 --> 00:00:01,300\nFirst sentence.\n\n"
             "2\n00:01:01,001 --> 00:01:02,250\nSecond sentence!\n",
         )
+
+    def test_fill_gaps_removes_line_pause_holes_from_subtitles(self):
+        timeline = {
+            "sentences": [
+                {"index": 0, "start": 0.0, "end": 0.4, "text": "First line."},
+                {"index": 1, "start": 0.5, "end": 0.9, "text": "Second line."},
+            ],
+            "duration": 0.95,
+            "line_pause_ms": 100,
+        }
+
+        # Default export keeps every real pause visible.
+        self.assertIn(
+            "00:00:00,000 --> 00:00:00,400",
+            timeline_to_srt(timeline),
+        )
+
+        filled = timeline_to_srt(timeline, fill_gaps=True)
+
+        self.assertIn("00:00:00,000 --> 00:00:00,500", filled)
+        # The last cue covers the requested tail pause as well.
+        self.assertIn("00:00:00,500 --> 00:00:00,950", filled)
+
+    def test_fill_gaps_leaves_the_source_timeline_untouched(self):
+        timeline = {
+            "sentences": [
+                {"index": 0, "start": 0.0, "end": 0.4, "text": "One."},
+                {"index": 1, "start": 0.7, "end": 1.0, "text": "Two."},
+            ],
+            "duration": 1.3,
+        }
+
+        filled = fill_subtitle_gaps(timeline)
+
+        self.assertEqual(filled["sentences"][0]["end"], 0.7)
+        self.assertEqual(filled["sentences"][1]["end"], 1.3)
+        # Timeline JSON keeps the exact audio timings.
+        self.assertEqual(timeline["sentences"][0]["end"], 0.4)
+        self.assertEqual(timeline["sentences"][1]["end"], 1.0)
+
+    def test_fill_gaps_never_invents_a_trailing_cue_end(self):
+        timeline = {
+            "sentences": [
+                {"index": 0, "start": 0.0, "end": 0.4, "text": "One."},
+                {"index": 1, "start": 0.5, "end": 0.9, "text": "Two."},
+            ]
+        }
+
+        filled = timeline_to_srt(timeline, fill_gaps=True)
+
+        self.assertIn("00:00:00,000 --> 00:00:00,500", filled)
+        self.assertIn("00:00:00,500 --> 00:00:00,900", filled)
 
     def test_inserts_pause_and_shifts_later_cues(self):
         timeline = {

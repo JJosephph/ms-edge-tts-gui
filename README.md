@@ -64,6 +64,7 @@
 - **独立句间停顿**：用词级边界定位真实语音末点，再替换原生间隔；时间轴、SRT 和音频同步更新，不改变人声语速。
 - **行末停顿**：逐行模式会精确改写每一行之间的静音，并裁掉最后一行的原生尾静音后写入指定时长，不再受不同声音原生停顿长短影响。
 - **SRT 字幕**：勾选“生成 SRT 字幕”后，每句对应一条字幕，时间严格匹配最终音频，可随 MP3 一起导出。
+- **字幕填充行末停顿**：逐行模式开启行末停顿后，可让导出的 SRT 首尾相接，导入剪辑软件时时间轴不再有空缺，同时音频本身保持真实停顿。
 - **网络保护**：生成前检测服务连接和代理环境变量；长时间无音频数据时会提示重试。
 - **更新检测**：启动时自动检查 GitHub 最新正式版；顶部“检查更新”可手动检查，发现新版本时显示更新内容和下载入口。
 - **三级语音选择**：语音一次性从远端拉取后在本地按 **语言 → 性别 → 音色** 分组（内置分组引擎），不用再大海捞针；默认保留 `en-US-AndrewMultilingualNeural`（英语男声），可随时自选。
@@ -75,10 +76,10 @@
 ### 中文界面预览
 
 <p align="center">
-<img src="assets/ui-v160-normal.png" alt="v1.6.0 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
+<img src="assets/ui-v161-normal.png" alt="v1.6.1 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
 </p>
 <p align="center">
-<sub>v1.6.0 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
+<sub>v1.6.1 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
 </p>
 
 ### 亮点功能：时间轴 JSON + 试听逐句高亮
@@ -90,13 +91,13 @@
 - **精准且零额外合成**：MP3 与时间轴在同一次请求中生成，时间轴直接使用微软 TTS 返回的句级边界，**不需要再次合成**，纯本地保存、完全免费、无需 API Key。
 
 <p align="center">
-<img src="assets/ui-v160-highlight.png" alt="试听逐句高亮：正在朗读的句子在文章中实时点亮" width="900">
+<img src="assets/ui-v161-highlight.png" alt="试听逐句高亮：正在朗读的句子在文章中实时点亮" width="900">
 </p>
 <p align="center">
   <sub>试听逐句高亮：播放时正在朗读的句子会实时点亮，同时“试听”按钮变成红色「■ 停止播放」。</sub>
 </p>
 <p align="center">
-<img src="assets/ui-v160-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="600">
+<img src="assets/ui-v161-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="600">
 </p>
 
 `.timeline.json` 内容示例：
@@ -134,7 +135,7 @@
 `[分页]` 不会被朗读。没有显式标记时，文本中的空行块也可以作为页面。每页支持备注，备注不会朗读，会写入 `pages.json`。点击「**逐页配音**」后，每页生成一个 MP3，最后可导出 ZIP。
 
 <p align="center">
-<img src="assets/ui-v160-page.png" alt="v1.6.0 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
+<img src="assets/ui-v161-page.png" alt="v1.6.1 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
 </p>
 <p align="center">
   <sub>逐页模式：左上角切换「逐页模式」，导入 txt / md / docx / pdf 后逐页核对文字与备注，再点击「逐页配音」批量生成。</sub>
@@ -153,7 +154,7 @@
 点击「**逐行配音**」后，软件按行顺序合成，完成后保存为 ZIP，包含 `line_001.mp3`、`line_002.mp3` 等音频以及 `lines.json`。打开「查看结果」后，可切换“当前音频 / 全部字幕”，在同一行编辑文字、查看时间轴、试听、拖动进度和重新生成；全部确认后可直接导出最终 ZIP。逐页和逐行模式都提供「**示例文件**」按钮。
 
 <p align="center">
-<img src="assets/ui-v160-line.png" alt="v1.6.0 逐行模式：每个非空行生成一个独立音频" width="900">
+<img src="assets/ui-v161-line.png" alt="v1.6.1 逐行模式：每个非空行生成一个独立音频" width="900">
 </p>
 <p align="center">
   <sub>逐行模式：粘贴文本后点击「按行准备」（或直接导入文件），每个非空行对应一个音频，可逐行翻页核对。</sub>
@@ -171,7 +172,7 @@
 - **导出最终 ZIP**：确认无误后点「导出最终 ZIP」，把音频、SRT 字幕和时间轴 JSON 一起打包保存。
 
 <p align="center">
-<img src="assets/ui-v160-result.png" alt="v1.6.0 查看结果：试听、字幕时间轴、拖动进度与逐行重新生成" width="900">
+<img src="assets/ui-v161-result.png" alt="v1.6.1 查看结果：试听、字幕时间轴、拖动进度与逐行重新生成" width="900">
 </p>
 <p align="center">
   <sub>「查看结果」· 全部字幕视图：编号、字幕文本、时间轴、试听 / 重新生成、可拖动进度条一屏完成校对。</sub>
@@ -185,6 +186,10 @@
 - 点击编辑区上方「**句末停顿**」可批量插入停顿指令；也可以手动写入 `[pause:500ms]`、`[pause:1.5s]`、`[pause:weak]`、`[pause:medium]`、`[pause:strong]` 或 `[pause]`。这些指令不会被朗读，单句指令优先于全局默认值。
 - 开启「**生成 SRT 字幕**」后，每句生成一条字幕；字幕时间会包含句间停顿，和最终 MP3 严格对应。
 - 开启「**时间轴 JSON + 试听高亮**」后，可同时导出 `.timeline.json`；批量 ZIP 会按每页或每行保存对应的 MP3、SRT 和时间轴文件。
+- 逐行模式开启「**行末停顿**」后，字幕区会多出「**填充行末停顿（字幕无空隙）**」选项：勾选后上一行字幕延续到下一行开始、末行覆盖行末延迟，导入剪辑软件不会出现空缺；不勾选则保留真实停顿——无论是否勾选，音频与时间轴 JSON 都不变。
+
+<img src="assets/ui-v161-srt-fill.png" alt="v1.6.1 逐行模式：字幕填充行末停顿选项，勾选后导出的 SRT 时间轴没有空缺" width="900">
+<sub>v1.6.1 逐行模式 ·「填充行末停顿（字幕无空隙）」默认关闭；勾选后导出的 SRT 首尾相接，音频与时间轴 JSON 始终保留真实停顿。</sub>
 
 ```text
 lines_archive.zip
@@ -214,24 +219,24 @@ The project is designed as a general-purpose open-source tool with three focused
 ## Interface Preview
 
 <p align="center">
-<img src="assets/ui-v160-normal.png" alt="v1.6.0 interface preview" width="900">
+<img src="assets/ui-v161-normal.png" alt="v1.6.1 interface preview" width="900">
 </p>
 
 <p align="center">
-<sub>v1.6.0 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
+<sub>v1.6.1 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
 </p>
 
 ## Work Modes
 
 <p align="center">
-<img src="assets/ui-v160-page.png" alt="v1.6.0 Page mode: one audio file per page" width="900">
+<img src="assets/ui-v161-page.png" alt="v1.6.1 Page mode: one audio file per page" width="900">
 </p>
 <p align="center">
   <sub>Page mode · import txt / md / docx / pdf, verify each page and its note, then dub every page into its own MP3.</sub>
 </p>
 
 <p align="center">
-<img src="assets/ui-v160-line.png" alt="v1.6.0 Line mode: one audio file per non-empty line" width="900">
+<img src="assets/ui-v161-line.png" alt="v1.6.1 Line mode: one audio file per non-empty line" width="900">
 </p>
 <p align="center">
   <sub>Line mode · every non-empty line becomes one audio file, ready for narration, explainer videos, and batch subtitles.</sub>
@@ -249,7 +254,7 @@ After generation, click **Review result** on the main window to preview, proof-r
 - **Export final ZIP** — one click bundles MP3 files, SRT subtitles, and timeline JSON.
 
 <p align="center">
-<img src="assets/ui-v160-result.png" alt="v1.6.0 Review result window: play, subtitles, timeline, seeking, regenerate" width="900">
+<img src="assets/ui-v161-result.png" alt="v1.6.1 Review result window: play, subtitles, timeline, seeking, regenerate" width="900">
 </p>
 <p align="center">
   <sub>The result viewer in "all items" mode: number, subtitle text, timeline, play / regenerate, and a draggable progress bar.</sub>
@@ -269,6 +274,7 @@ After generation, click **Review result** on the main window to preview, proof-r
 | **Timeline JSON + highlight** | Optional one-click toggle on the main UI: saving bundles the MP3 and a `.timeline.json` (each sentence's start/end seconds) into one ZIP, and during Play the sentence being read is highlighted live in the article. A " ? " help button shows a JSON example and a highlight demo. |
 | **Independent sentence pause** | Add silence between sentences in precise milliseconds without changing the voice's speaking rate. The pause is reflected in audio duration, timeline JSON, and SRT timestamps. |
 | **SRT subtitles** | Generate one SRT cue per sentence. Timings match the final audio, including configured sentence pauses; batch ZIP exports place the subtitle beside its MP3. |
+| **Gapless subtitle option** | In Line mode with the line-end pause enabled, "Fill line-end pause (gapless subtitles)" makes every cue run until the next one starts and lets the last cue cover the trailing pause, so imported subtitles have no holes. It only rewrites the SRT text; the audio and timeline JSON keep the real pauses. |
 | **Restore defaults** | The voice-deck button resets voice to `en-US-AndrewMultilingualNeural` and rate/volume/pitch to `+0%`/`+0%`/`+0Hz` in one click. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
 | **Network protection** | Checks Edge TTS service availability and detects proxy environment variables before generation. |
@@ -287,13 +293,13 @@ The feature we are most proud of — enable the **Timeline JSON + highlight** to
 - **Precise with no extra synthesis**: the MP3 and timeline are produced in the same request, using sentence-boundary metadata returned directly by Microsoft TTS. **No re-rendering** is needed; files are saved locally, free, with no API key.
 
 <p align="center">
-<img src="assets/ui-v160-highlight.png" alt="Live sentence highlight while playing, with the red Stop button" width="900">
+<img src="assets/ui-v161-highlight.png" alt="Live sentence highlight while playing, with the red Stop button" width="900">
 </p>
 <p align="center">
   <sub>Live sentence highlight: the sentence being read lights up in the article, and the Play button becomes a red Stop button.</sub>
 </p>
 <p align="center">
-<img src="assets/ui-v160-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="600">
+<img src="assets/ui-v161-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="600">
 </p>
 
 Example `.timeline.json`:
@@ -362,6 +368,8 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 7. Enable **Generate SRT subtitles** when you want one subtitle cue per sentence. Page and line batches can be saved as a ZIP with the numbered MP3 files, matching SRT/timeline files, and `pages.json` or `lines.json`.
 8. After generation, click **Play** to listen (the button turns into a red **Stop** while playing) or **Save Audio** to export. Watch the status line and progress bar during generation; the bar stays at 100% when done.
 9. In Page or Line mode, open **Review result** to check every item: per-row Play / Stop, draggable progress with millisecond timestamps, sentence-level subtitles, per-row text edits with **Regenerate**, and a final **Export final ZIP** for the whole batch.
+
+In Line mode, enabling the line-end pause also reveals **Fill line-end pause (gapless subtitles)** in the subtitle area. Checked, every cue runs until the next one starts and the last cue covers the trailing pause, so imported subtitles have no holes; unchecked keeps the real pauses. Either way the audio and the timeline JSON are untouched — the option only rewrites the exported SRT text.
 
 ## Network and Proxy
 
