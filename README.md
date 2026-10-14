@@ -17,9 +17,24 @@
   <a href="#中文说明">中文说明</a> ·
   <a href="#english-guide">English guide</a> ·
   <a href="#downloads">Downloads</a> ·
-  <a href="#请作者喝杯咖啡">支持作者</a> ·
+  <a href="#赞赏支持--support-the-author">支持作者</a> ·
   <a href="#network-and-proxy">Network &amp; proxy</a> ·
   <a href="#build-and-release">Build</a>
+</p>
+
+---
+
+## 赞赏支持 / Support the Author
+
+> **中文**：这个工具完全免费、开源（MIT License），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请作者喝一杯咖啡，支持项目继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
+>
+> **English**: This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
+
+<p align="center">
+  <img src="assets/donate-wechat-pay.jpg" alt="微信支付收款码：扫码请作者喝一杯咖啡 / WeChat Pay QR code" width="320">
+</p>
+<p align="center">
+  <sub>微信扫码 · 金额随意 · 感谢支持 / Scan with WeChat · any amount · thank you</sub>
 </p>
 
 ---
@@ -185,19 +200,6 @@ lines_archive.zip
 2. 安装包与便携版 EXE 均已内置 Python 运行环境，Windows 10 及更高版本无需另行安装 Python。
 3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，点击“生成音频”合成一次；之后点“试听”播放，或点“保存下载”导出 MP3，全程无需重复合成。
 4. 安装包会标明“免费 · 开源（MIT License）· 开发者 WangYufan”，支持从 Windows“设置 → 应用”或安装目录中的 `unins000.exe` 卸载。
-
-### 请作者喝杯咖啡
-
-这个工具完全免费、开源（MIT License），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请作者喝一杯咖啡，支持项目继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
-
-<p align="center">
-  <img src="assets/donate-wechat-pay.jpg" alt="微信支付收款码：扫码请作者喝一杯咖啡" width="320">
-</p>
-<p align="center">
-  <sub>微信扫码 · 金额随意 · 感谢支持</sub>
-</p>
-
-> English: This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code above. The project stays free either way - a Star also helps a lot.
 
 ---
 
@@ -463,17 +465,6 @@ git push origin v1.4.1
 ## Contributing
 
 Issues, feature requests, and pull requests are welcome. If this project helps you, please consider giving it a **Star** on GitHub—it makes the project easier for other users to discover.
-
-## Support the Author
-
-This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
-
-<p align="center">
-  <img src="assets/donate-wechat-pay.jpg" alt="WeChat Pay QR code - buy the author a coffee" width="320">
-</p>
-<p align="center">
-  <sub>Scan with WeChat · any amount · thank you for supporting the project</sub>
-</p>
 
 ## License
 
