@@ -252,6 +252,9 @@ def split_reading_sentences(text: str) -> list:
             if char not in ".!?\u3002\uff01\uff1f":
                 i += 1
                 continue
+            if char == "." and _is_decimal_point(value, i):
+                i += 1
+                continue
             if char == "." and _is_abbreviation_boundary(value, i):
                 i += 1
                 continue
@@ -271,6 +274,13 @@ def split_reading_sentences(text: str) -> list:
         if tail and _has_spoken_content(tail):
             sentences.append(tail)
     return sentences
+
+
+def _is_decimal_point(text: str, dot_index: int) -> bool:
+    """Keep dots inside numbers such as 49.9 or v1.6.2 from splitting."""
+    if dot_index <= 0 or dot_index + 1 >= len(text):
+        return False
+    return text[dot_index - 1].isdigit() and text[dot_index + 1].isdigit()
 
 
 def _is_abbreviation_boundary(text: str, dot_index: int) -> bool:

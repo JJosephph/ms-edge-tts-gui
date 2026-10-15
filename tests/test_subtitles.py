@@ -15,6 +15,7 @@ from tts_engine import (
     insert_sentence_pauses,
     line_end_sentence_indices,
     parse_pause_directives,
+    split_reading_sentences,
     timeline_to_srt,
     validate_pause_ms,
 )
@@ -98,6 +99,30 @@ class SubtitleTests(unittest.TestCase):
                 "en-US-GuyNeural",
                 "+18%",
             )
+
+    def test_decimal_points_do_not_split_reading_sentences(self):
+        text = "川西红枫岭、49.9、金秋枫韵双人景区门票加穿越丛林加徒步线"
+        self.assertEqual(split_reading_sentences(text), [text])
+
+        text = "版本 v1.6.2、价格 27.01 元。下一句。"
+        self.assertEqual(
+            split_reading_sentences(text),
+            ["版本 v1.6.2、价格 27.01 元。", "下一句。"],
+        )
+
+    def test_decimal_text_maps_word_boundaries_without_shifting(self):
+        payload = build_sentence_timeline_from_word_boundaries(
+            "价格 49.9 元。",
+            [
+                {"text": "价格", "offset": 0, "duration": 1000000},
+                {"text": "49.9", "offset": 1000000, "duration": 1000000},
+                {"text": "元", "offset": 2000000, "duration": 1000000},
+            ],
+            "zh-CN-XiaoyiNeural",
+            "+0%",
+        )
+        self.assertEqual(len(payload["sentences"]), 1)
+        self.assertEqual(payload["sentences"][0]["end"], 0.3)
 
     def test_formats_sentence_timeline_as_srt(self):
         srt = timeline_to_srt(

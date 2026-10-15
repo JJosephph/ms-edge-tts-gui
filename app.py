@@ -55,7 +55,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.6.3"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
