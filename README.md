@@ -55,6 +55,14 @@
 
 **Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
+### v1.7.0 更新亮点
+
+- **普通模式批量上传**：无需切换到独立模式，点击「批量上传」即可拖入或选择多个 `txt / md / docx / pdf`；原输入框会变成逐行文件列表，不点击时仍保持原有粘贴文本流程。
+- **每个文件独立配置**：列表显示序号、文件名、音色、字数和进度；点击任意一行后，右侧音色、句间停顿、标点、SRT、时间轴、语速、音量、音调只作用于该文件。
+- **文本规则标记**：可在每个文件第一行写入 `{Abeo|200ms{,.~}|srt}` 或完整的 `{tts:...}` 规则；导入时自动应用并从朗读文本中过滤。规则配置弹窗提供中文音色字典，可按语言、性别和关键词筛选，并可直接模拟设置、复制规则。
+- **批量续跑与下载**：批量生成只处理未完成项，已完成文件不会重复合成；可打包下载全部完成项，也可右键某个已完成 `100%` 的文件单独下载 ZIP，或选中未完成项重试。
+- **稳定性修复**：修复多个文件规则串用、普通批量误继承逐行模式行末停顿，以及中文/Unicode 输出文件名触发 `failed to decode file (-7)` 的问题。
+
 - **生成、试听与保存**：一键生成全文音频；生成后可随时“试听”或“保存下载”，无需重复合成。播放中“试听”按钮会变成醒目的红色「■ 停止播放」，再点一次即可停止，音频播放结束也会自动还原。
 - **三种工作模式**：普通模式直接读取输入框全文；逐页模式按 `[分页]` 标记生成一页一个音频；逐行模式可直接生成带精确行间停顿的全文，也可“按行准备”后为每个非空行导出独立音频。
 - **实时进度**：生成时显示近似 `0–100%` 进度，完成后进度条保持 100%。
@@ -71,7 +79,9 @@
 - **音色自然丰富**：支持几百种语言、数百个音色，男声、女声都非常丰富；无论中文、粤语、英语还是其他外语，都是十分自然的 TTS 朗读，不是机器音——用过 Edge 朗读功能的人都懂。
 - **兼容原工作流**：默认 `en-US-AndrewMultilingualNeural`，语速 `+0%`、音量 `+0%`、音调 `+0Hz`；「恢复初始设置」可一键还原。
 - **不占空间**：生成的音频只保存在一个临时 MP3 里，可自定义目录、打开或清理，关闭软件时自动删除。
-- **文件导入与示例**：逐页、逐行模式支持 `txt / md / docx / pdf`；界面提供示例 TXT 下载按钮，方便按正确格式准备 100 行以上的批量文稿。
+- **文件导入与示例**：普通模式支持批量上传，逐页、逐行模式支持 `txt / md / docx / pdf`；界面提供示例 TXT 下载按钮，方便按正确格式准备批量文稿。
+- **批量文件列表**：普通模式点击「批量上传」后，原输入框会切换为文件列表（序号、文件名、音色、字数、进度）。选中任意一行后，右侧设置只作用于该文件；列表支持左侧复选框、表头全选、`Ctrl+A` 和 `Shift/Ctrl` 多选移除。批量生成只处理未完成项，完成后可打包下载，也可右键某个 100% 完成的文件单独下载 ZIP，或重试所选未完成项。
+- **文本规则标记**：可在每个文件第一行写入音色、句间停顿、标点、SRT、时间轴 JSON、语速、音量、音调等规则，导入时自动应用并从朗读文本中过滤。
 
 ### 中文界面预览
 
@@ -119,6 +129,31 @@
 #### 1. 普通模式
 
 默认模式无需导入文件，也不要求分页。把完整文稿粘贴到左侧输入框，点击「**生成音频**」即可得到一个 MP3。输入框里的换行只作为朗读文本的一部分，不会自动拆成多个文件。
+
+##### 普通模式 · 批量上传
+
+点击「**批量上传**」后，可在一个窗口中拖入多个 `txt / md / docx / pdf` 文件，或点击「选择多个文件」。确认后，普通模式的输入框会切换成文件列表；未点击批量上传时，粘贴文本的原有流程完全不变。
+
+- 列表显示序号、文件名、当前音色、字数和生成进度。
+- 点击任意一行，右侧的音色、停顿、字幕、时间轴、语速、音量、音调只配置该文件。
+- 左侧复选框和表头全选可用于批量移除；列表内支持 `Ctrl+A`，并支持 `Shift/Ctrl` 多选。点击「**批量生成**」时只处理未完成项，已完成文件会保留，不会重复生成。
+- 音频名称默认使用 TXT 文件名；点击「打包下载全部完成项」可下载所有已完成项，也可在列表中右键某个已完成 `100%` 的文件单独下载 ZIP，或右键重试所选未完成项。
+- 单个 ZIP 同样包含音频、SRT 字幕、时间轴 JSON 和 `metadata.json`。
+
+每个文本文件可以在第一行加入规则标记，例如：
+
+```text
+{Abeo|200ms{,.~}|srt}
+这是正文第一句。这一行不会朗读规则标记。
+```
+
+更完整的写法：
+
+```text
+{tts:Ana|pause=200ms|marks=,.!?|srt=1|json=1|rate=+10%|volume=+0%|pitch=+0Hz}
+```
+
+字段含义：`voice/v` 音色，`pause` 句间停顿，`marks` 标点，`srt` 字幕，`json` 时间轴，`rate` 语速，`volume` 音量，`pitch` 音调。普通模式没有“行”的概念，因此普通批量规则不包含 `line` / `fill`，也不继承逐行模式的行末停顿；行末停顿只在逐行模式提供。界面里的「**规则配置**」按钮可以查看音色字典、模拟右侧设置并复制规则编码；音色选择同样按「语言 → 性别 → 音色」三级进行，字典带中文名、语言、性别表头，并支持按语言、性别和关键词筛选。
 
 #### 2. 逐页模式
 
@@ -214,7 +249,9 @@ lines_archive.zip
 
 **Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **WangYufan**.
 
-The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page or line batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt help with real-world network conditions.
+The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. Normal mode also includes an embedded **Batch Upload** workspace: paste text as before, or drop/select multiple files, configure each row independently, generate all files, and export a ZIP. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page, line, or file batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt help with real-world network conditions.
+
+**v1.7.0 highlights:** Normal mode now has an embedded file batch with per-file settings and first-line rules such as `{Abeo|200ms{,.~}|srt}`. Completed items are preserved across retries, completed batches can be exported together or individually as ZIP files, and Unicode output filenames no longer trigger the `failed to decode file (-7)` error.
 
 ## Interface Preview
 
@@ -266,6 +303,7 @@ After generation, click **Review result** on the main window to preview, proof-r
 | --- | --- |
 | **Text to MP3** | Paste Markdown, plain text, or HTML-derived text and export a full MP3 file. |
 | **Three work modes** | **Normal** reads the composer text as one audio file. **Page** imports `txt / md / docx / pdf`, splits on a standalone `[分页]` marker (or blank-line blocks when no marker is present), and creates one audio file per page. **Line** imports a file or prepared text and creates one audio file for every non-empty line. |
+| **Embedded file batch** | In **Normal** mode, click **Batch Upload** to drop or select multiple `txt / md / docx / pdf` files. The composer becomes a file list (number, name, voice, characters, progress); selecting a row edits only that file's settings, and completed items can be exported as one ZIP or individually from the row context menu. A first-line rule such as `{Abeo|200ms{,.~}|srt}` or the full `{tts:...}` form sets voice, pauses, subtitles, timeline, rate, volume, and pitch before import, then is removed from the spoken text. The rule dialog uses the same **Language → Gender → Voice** picker and provides a headed, filterable voice dictionary with Chinese names. |
 | **Batch page / line export** | Page and line modes show ordered progress and export numbered MP3 files plus `pages.json` or `lines.json`; optional SRT, timeline JSON, and source notes are included with the matching item. A downloadable example TXT is available in both batch modes. |
 | **Generate once, play & save** | Synthesize the full audio a single time, then Play or Save it anytime without re-rendering. While playing, the button turns into a red **Stop** button so the state is always obvious; it restores itself when the audio ends. |
 | **Real progress** | Generation shows live, approximate `0–100%` progress plus received audio size; the bar stays at 100% when finished. |
@@ -359,10 +397,10 @@ On Windows, you can also double-click `run.bat` for first-run setup and launch.
 
 ## Using the App
 
-1. **Choose a mode**. Normal mode is the default and needs only the Composer text box. Page and Line modes are selected manually when you want batch output.
+1. **Choose a mode**. Normal mode is the default and needs only the Composer text box. Page and Line modes are selected manually when you want their page/line batch output. Normal mode can optionally switch its composer into the embedded file-batch list with **Batch Upload**.
 2. **Choose a voice** from the Voice Deck — pick **Language**, then **Gender**, then the final **Voice** from the filtered list. The default is the English male voice `en-US-AndrewMultilingualNeural`; use **Restore defaults** at any time to reset voice and rate/volume/pitch.
 3. **Adjust rate, volume, pitch, and sentence pause** if needed. Sentence pause is silence between sentences and is measured in milliseconds.
-4. In **Normal** mode, paste a complete script and click **Generate Audio** to create one MP3. Newlines remain part of the same narration.
+4. In **Normal** mode, paste a complete script and click **Generate Audio** to create one MP3. Newlines remain part of the same narration. Alternatively, click **Batch Upload** to drop or select multiple files; the composer becomes a per-file list, and each row can use its own voice and settings.
 5. In **Page** mode, click **Import File**, choose `txt / md / docx / pdf`, review pages, and use **Dub All Pages** to synthesize one MP3 per page. A standalone `[分页]` line is the explicit page separator; the marker is not spoken.
 6. In **Line** mode, import a TXT or paste prepared text, then choose **Prepare Lines**. Every non-empty line becomes one item; click **Dub All Lines** to synthesize `line_001.mp3`, `line_002.mp3`, and so on.
 7. Enable **Generate SRT subtitles** when you want one subtitle cue per sentence. Page and line batches can be saved as a ZIP with the numbered MP3 files, matching SRT/timeline files, and `pages.json` or `lines.json`.

@@ -6,3 +6,4 @@ pypdf>=4.0
 miniaudio>=1.61
 lameenc>=1.7
 cffi>=1.15
+tkinterdnd2>=0.6.4

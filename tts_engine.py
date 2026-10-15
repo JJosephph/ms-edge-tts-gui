@@ -707,8 +707,13 @@ def insert_sentence_pauses(
             "缺少音频停顿处理组件，请重新安装完整版本。"
         ) from exc
 
-    decoded = miniaudio.decode_file(
-        audio_path,
+    # miniaudio's file helpers use the C file API on Windows and fail on
+    # non-ASCII paths such as "1 - 副本.mp3". Decode from bytes instead so
+    # batch output names can safely contain Chinese and other Unicode text.
+    with open(audio_path, "rb") as handle:
+        audio_bytes = handle.read()
+    decoded = miniaudio.decode(
+        audio_bytes,
         output_format=miniaudio.SampleFormat.SIGNED16,
         nchannels=1,
         sample_rate=POSTPROCESS_SAMPLE_RATE,

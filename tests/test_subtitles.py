@@ -214,6 +214,25 @@ class SubtitleTests(unittest.TestCase):
         self.assertEqual(adjusted["sentences"][1]["end"], 1.1)
         self.assertGreater(after - before, 0.1)
 
+    def test_inserts_pause_with_unicode_output_path(self):
+        timeline = {
+            "sentences": [
+                {"index": 0, "start": 0.0, "end": 0.4, "text": "One."},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "测试-副本.mp3"
+            _write_test_mp3(path)
+
+            adjusted = insert_sentence_pauses(
+                str(path),
+                timeline,
+                0,
+                tail_pause_ms=50,
+            )
+
+        self.assertEqual(adjusted["duration_padding_ms"], 50)
+
     def test_inline_pause_directives_are_removed_and_mapped(self):
         spoken, overrides = parse_pause_directives(
             "第一句。[pause:500ms]第二句。[pause:1.5s]第三句。"

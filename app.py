@@ -18,6 +18,7 @@ import tempfile
 import time
 import threading
 import webbrowser
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -26,8 +27,15 @@ import customtkinter as ctk
 import pygame
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
+from batch_text_config import (
+    build_tts_header,
+    build_voice_alias_index,
+    parse_tts_header,
+    resolve_voice_alias,
+    sanitize_filename_stem,
+)
 from tts_engine import (
     MAX_PAUSE_MS,
     MAX_RETRIES,
@@ -52,10 +60,16 @@ from voice_groups import (
     GENDER_OTHER,
     VoiceGroupingEngine,
 )
-from page_import import Page, import_file, import_lines, split_text_into_lines
+from page_import import (
+    Page,
+    import_file,
+    import_lines,
+    read_document_text,
+    split_text_into_lines,
+)
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.6.3"
+APP_VERSION = "1.7.0"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -97,6 +111,7 @@ THEMES = {
         "warning": "#F6C66C", "danger": "#F47D92", "danger_hover": "#D9556D",
         "star": "#4A3B16",
         "star_hover": "#5D4B1D", "field": "#0A1322", "log": "#09121F",
+        "disabled_text": "#53657F",
     },
     "light": {
         "app_bg": "#EEF3FA", "surface": "#FFFFFF", "surface_alt": "#E6EEF9",
@@ -106,6 +121,7 @@ THEMES = {
         "warning": "#A66A00", "danger": "#C33D56", "danger_hover": "#A82F47",
         "star": "#FFF3D6",
         "star_hover": "#F8E1A7", "field": "#F8FBFF", "log": "#F7FAFE",
+        "disabled_text": "#93A3BA",
     },
 }
 
@@ -128,6 +144,30 @@ class TTSTask:
         self.output_path = output_path
         self.cfg = cfg
         self.mode = mode  # "preview" | "export"
+
+
+@dataclass
+class FileBatchItem:
+    """One source document in normal mode's optional file-batch workspace."""
+
+    index: int
+    source_path: str
+    display_name: str
+    raw_text: str
+    text: str
+    selected: bool = False
+    header_line: str = ""
+    header_options: dict = field(default_factory=dict)
+    cfg: TTSConfig = field(default_factory=TTSConfig)
+    timeline_enabled: bool = False
+    srt_enabled: bool = False
+    srt_fill_line_pause: bool = False
+    status: str = "pending"
+    progress: float = 0.0
+    output_path: str = ""
+    timeline: dict | None = None
+    error: str = ""
+    result_name: str = ""
 
 
 class App(ctk.CTk):
@@ -220,6 +260,30 @@ class App(ctk.CTk):
         self._result_preview_callbacks: dict = {}
         self._result_preview_refresh = None
         self._batch_dir: str | None = None
+        self._file_batch_active = False
+        self._file_items: list[FileBatchItem] = []
+        self._selected_file_index = -1
+        self._loading_file_item = False
+        self._file_batch_dir: str | None = None
+        self._voice_alias_index: dict[str, str] = {
+            "ana": "en-US-AnaNeural",
+            "jeppe": "da-DK-JeppeNeural",
+            "abeo": "en-NG-AbeoNeural",
+            "andrew": DEFAULT_VOICE,
+        }
+        self._dnd_ready = False
+        self._dnd_available = False
+        self._batch_frame = None
+        self._batch_tree = None
+        self._batch_summary = None
+        self._batch_empty = None
+        self._batch_context_menu = None
+        self._btn_batch_upload = None
+        self._btn_batch_help = None
+        self._btn_batch_add = None
+        self._btn_batch_remove = None
+        self._btn_batch_edit = None
+        self._btn_batch_exit = None
         self._note_var = None
         self._note_entry = None
         self._page_bar = None
@@ -235,6 +299,9 @@ class App(ctk.CTk):
         self._mode_settings_hint = None
         self._pause_label = None
         self._pause_entry = None
+        self._pause_duration_row = None
+        self._pause_duration_label = None
+        self._pause_unit_label = None
         self._sentence_pause_row = None
         self._sentence_pause_hint = None
         self._punctuation_label = None
@@ -298,6 +365,7 @@ class App(ctk.CTk):
         "mode_page": {"zh": "逐页模式", "en": "By Page"},
         "mode_line": {"zh": "逐行模式", "en": "By Line"},
         "helper_normal": {"zh": "输入或粘贴文字，右侧直接生成一个音频。", "en": "Type or paste text, then generate one audio file from the controls on the right."},
+        "helper_normal_batch": {"zh": "已进入普通模式的批量文件列表：点击一行后，右侧设置只作用于该文件；可批量生成，也可在完成后右键单独下载 ZIP。", "en": "File-batch list is active in Normal mode: select a row to configure that file only, generate all files, then right-click a completed row to download its ZIP."},
         "helper_page": {"zh": "逐页模式请在 TXT 中用单独一行的 [分页] 标记分隔页面；标记不会被朗读，每页生成一个音频。", "en": "In page mode, put [分页] on its own line in the TXT file to separate pages; the marker is not spoken and each page becomes one audio file."},
         "helper_line": {"zh": "粘贴文本后点击“按行准备”，或直接导入文件；每个非空行生成一个音频，空行自动忽略。", "en": "Paste text and click Prepare Lines, or import a file; each non-empty line becomes one audio file."},
         "voice": {"zh": "语音", "en": "Voice"},
@@ -336,6 +404,8 @@ class App(ctk.CTk):
         "mode_settings_page": {"zh": "逐页模式 · 音频设置", "en": "By Page · Audio settings"},
         "mode_settings_line": {"zh": "逐行模式 · 音频设置", "en": "By Line · Audio settings"},
         "mode_settings_hint_normal": {"zh": "整段文本生成一个音频文件。", "en": "The full text becomes one audio file."},
+        "mode_settings_batch": {"zh": "批量文件 · 所选文件设置", "en": "File Batch · Selected file"},
+        "mode_settings_hint_batch": {"zh": "这里的音色、停顿、字幕与时间轴设置只修改当前选中的文件。文本首行标记会在导入时覆盖这些默认值。", "en": "Voice, pause, subtitle, and timeline settings apply only to the selected file. A first-line text rule overrides these defaults on import."},
         "mode_settings_hint_page": {"zh": "每页独立生成音频，适合章节或镜头批量导出。", "en": "Each page becomes a separate audio file for batch export."},
         "mode_settings_hint_line": {"zh": "直接生成全文时会精确改写行间停顿；按行准备后可逐行导出独立音频。", "en": "Generating the full text applies exact line gaps; Prepare Lines exports each line as an independent audio file."},
         "pause_label_normal": {"zh": "句间停顿", "en": "Sentence pause"},
@@ -381,6 +451,7 @@ class App(ctk.CTk):
         "result_next": {"zh": "下一条", "en": "Next"},
         "result_item_page": {"zh": "第 {current}/{total} 页", "en": "Page {current}/{total}"},
         "result_item_line": {"zh": "第 {current}/{total} 行", "en": "Line {current}/{total}"},
+        "result_item_file": {"zh": "第 {current}/{total} 个文件", "en": "File {current}/{total}"},
         "result_all_heading": {"zh": "音频 {number:03d}", "en": "Audio {number:03d}"},
         "result_no_subtitles": {"zh": "当前结果没有可用的句级时间轴。生成时开启时间轴后即可查看字幕。", "en": "This result has no sentence timeline. Enable timeline generation to view subtitles."},
         "result_apply": {"zh": "应用修改并重新生成", "en": "Apply edits and regenerate"},
@@ -405,6 +476,77 @@ class App(ctk.CTk):
         "repository": {"zh": "仓库：", "en": "Repo: "},
         "empty": {"zh": "请输入文章内容。", "en": "Please enter some article text."},
         "import_file": {"zh": "导入文件", "en": "Import File"},
+        "batch_upload": {"zh": "批量上传", "en": "Batch Upload"},
+        "batch_add_files": {"zh": "添加文件", "en": "Add Files"},
+        "batch_help": {"zh": "规则配置", "en": "Rule Guide"},
+        "batch_exit": {"zh": "退出批量", "en": "Exit Batch"},
+        "batch_import_title": {"zh": "批量添加文本文件", "en": "Add text files in batch"},
+        "batch_import_hint": {"zh": "可拖入多个文件，或点击下方按钮选择多个文件。支持 txt / md / docx / pdf。", "en": "Drop multiple files here, or choose multiple files below. Supports txt / md / docx / pdf."},
+        "batch_drop_ready": {"zh": "拖入文件到这里", "en": "Drop files here"},
+        "batch_drop_unavailable": {"zh": "当前环境未启用拖拽，请使用“选择多个文件”。", "en": "Drag and drop is unavailable here; use “Choose files” instead."},
+        "batch_choose_files": {"zh": "选择多个文件", "en": "Choose Files"},
+        "batch_no_files": {"zh": "请先批量上传至少一个文本文件。", "en": "Please batch-upload at least one text file first."},
+        "batch_imported": {"zh": "已加入 {count} 个文件。", "en": "Added {count} file(s)."},
+        "batch_import_skipped": {"zh": "已跳过 {count} 个无法导入的文件。", "en": "Skipped {count} file(s) that could not be imported."},
+        "batch_import_unsupported": {"zh": "不支持的文件格式：{name}", "en": "Unsupported file type: {name}"},
+        "batch_summary": {"zh": "共 {total} 个文件，完成 {done} 个，失败 {failed} 个", "en": "{total} files · {done} done · {failed} failed"},
+        "batch_generate": {"zh": "批量生成", "en": "Generate Batch"},
+        "batch_save_all": {"zh": "打包下载全部完成项", "en": "Download Completed ZIP"},
+        "batch_save_selected": {"zh": "下载所选 ZIP", "en": "Download Selected ZIP"},
+        "batch_retry_selected": {"zh": "重试所选未完成项", "en": "Retry Selected Incomplete"},
+        "batch_edit_text": {"zh": "查看 / 编辑文本", "en": "View / Edit Text"},
+        "batch_remove": {"zh": "移除所选", "en": "Remove Selected"},
+        "batch_only_complete": {"zh": "只有进度 100% 的文件才能单独下载。", "en": "Only files at 100% can be downloaded individually."},
+        "batch_none_complete": {"zh": "还没有已完成 100% 的文件。", "en": "No completed files are available yet."},
+        "batch_all_complete": {"zh": "所有文件都已完成，没有需要重试的文件。", "en": "All files are complete; there is nothing to retry."},
+        "batch_retry_none": {"zh": "所选文件都已完成，没有需要重试的文件。", "en": "The selected files are already complete; there is nothing to retry."},
+        "batch_skipped_complete": {"zh": "已跳过 {count} 个已完成文件。", "en": "Skipped {count} completed file(s)."},
+        "batch_partial_confirm": {"zh": "仍有 {count} 个文件未完成，压缩包只会包含已完成项。继续吗？", "en": "{count} file(s) are not complete. The ZIP will include completed items only. Continue?"},
+        "batch_zip_title": {"zh": "保存批量文件配音压缩包", "en": "Save file-batch dubbing ZIP"},
+        "batch_zip_filetype": {"zh": "ZIP 压缩包（音频 + 字幕 + 时间轴）", "en": "ZIP bundle (audio + subtitles + timeline)"},
+        "batch_single_zip_title": {"zh": "保存单个文件配音压缩包", "en": "Save single-file dubbing ZIP"},
+        "batch_text_editor_title": {"zh": "编辑文本与规则标记", "en": "Edit text and rule header"},
+        "batch_save": {"zh": "保存", "en": "Save"},
+        "batch_cancel": {"zh": "取消", "en": "Cancel"},
+        "batch_rule_title": {"zh": "文本规则配置与音色字典", "en": "Text Rules & Voice Dictionary"},
+        "batch_rule_desc": {"zh": "在文本文件第一行加入规则标记，导入批量列表时会自动应用，并在合成前过滤掉这一行。", "en": "Put a rule header on the first line. It is applied on import and removed before synthesis."},
+        "batch_rule_syntax_title": {"zh": "规则格式", "en": "Rule syntax"},
+        "batch_rule_example_title": {"zh": "示例", "en": "Examples"},
+        "batch_rule_sim_title": {"zh": "模拟右侧设置并复制规则", "en": "Simulate settings and copy the rule"},
+        "batch_rule_preview": {"zh": "规则编码", "en": "Rule code"},
+        "batch_rule_copy": {"zh": "复制规则", "en": "Copy rule"},
+        "batch_rule_copied": {"zh": "规则已复制到剪贴板。", "en": "Rule copied to the clipboard."},
+        "batch_rule_voice_title": {"zh": "音色字典", "en": "Voice dictionary"},
+        "batch_rule_voice_pick": {"zh": "先选语言、性别，再选音色", "en": "Choose language, gender, then voice"},
+        "batch_rule_all_languages": {"zh": "全部语言", "en": "All languages"},
+        "batch_rule_search": {"zh": "搜索别名、中文名或语音代码…", "en": "Search alias, name, or voice code…"},
+        "batch_rule_dict_alias": {"zh": "别名", "en": "Alias"},
+        "batch_rule_dict_name": {"zh": "中文名/名称", "en": "Chinese / Name"},
+        "batch_rule_dict_code": {"zh": "语音代码", "en": "Voice code"},
+        "batch_rule_dict_locale": {"zh": "语言", "en": "Language"},
+        "batch_rule_dict_gender": {"zh": "性别", "en": "Gender"},
+        "batch_rule_dict_count": {"zh": "显示 {count} 个音色", "en": "{count} voices"},
+        "batch_rule_no_match": {"zh": "没有符合当前语言、性别和搜索条件的音色。", "en": "No voices match the current language, gender, and search filters."},
+        "batch_rule_close": {"zh": "关闭", "en": "Close"},
+        "batch_rule_invalid": {"zh": "当前设置无法生成规则：{error}", "en": "Cannot build a rule from the current settings: {error}"},
+        "batch_rule_no_voice": {"zh": "语音列表尚未加载，仍可使用 Ana / Jeppe / Abeo / Andrew 或完整语音代码。", "en": "The voice list is not loaded yet. You can still use Ana / Jeppe / Abeo / Andrew or a full voice code."},
+        "batch_status_pending": {"zh": "等待", "en": "Pending"},
+        "batch_status_generating": {"zh": "生成中 {progress:.0f}%", "en": "Generating {progress:.0f}%"},
+        "batch_status_done": {"zh": "完成 100%", "en": "Done 100%"},
+        "batch_status_failed": {"zh": "失败", "en": "Failed"},
+        "batch_status_canceled": {"zh": "已取消", "en": "Canceled"},
+        "batch_table_number": {"zh": "序号", "en": "No."},
+        "batch_table_name": {"zh": "文件名", "en": "File"},
+        "batch_table_voice": {"zh": "音色", "en": "Voice"},
+        "batch_table_chars": {"zh": "字数", "en": "Chars"},
+        "batch_table_status": {"zh": "进度", "en": "Progress"},
+        "batch_switch_exit_confirm": {"zh": "切换到其他模式会退出批量文件列表，未导出的临时结果也会清理。继续吗？", "en": "Switching modes exits the file-batch list and clears temporary results. Continue?"},
+        "batch_exit_confirm": {"zh": "退出批量文件列表？未导出的临时结果会被清理。", "en": "Exit the file-batch list? Temporary results will be cleared."},
+        "batch_rule_compact_example": {"zh": "紧凑写法：{Abeo|200ms{,.~}|srt}", "en": "Compact: {Abeo|200ms{,.~}|srt}"},
+        "batch_rule_full_example": {"zh": "完整写法：{tts:Ana|pause=200ms|marks=,.!?|srt=1|json=1|rate=+10%|volume=+0%|pitch=+0Hz}", "en": "Full: {tts:Ana|pause=200ms|marks=,.!?|srt=1|json=1|rate=+10%|volume=+0%|pitch=+0Hz}"},
+        "batch_rule_no_pause_example": {"zh": "不启用句间停顿：{tts:Ana|srt=1|json=0|rate=+0%|volume=+0%|pitch=+0Hz}", "en": "Sentence pause off: {tts:Ana|srt=1|json=0|rate=+0%|volume=+0%|pitch=+0Hz}"},
+        "batch_rule_fields": {"zh": "voice/v=音色；pause=句间停顿；marks=标点；srt=字幕；json=时间轴；rate=语速；volume=音量；pitch=音调。", "en": "voice/v=voice; pause=sentence pause; marks=punctuation; srt=subtitles; json=timeline; rate=speed; volume=volume; pitch=pitch."},
+        "batch_rule_fields_no_pause": {"zh": "voice/v=音色；srt=字幕；json=时间轴；rate=语速；volume=音量；pitch=音调。", "en": "voice/v=voice; srt=subtitles; json=timeline; rate=speed; volume=volume; pitch=pitch."},
         "download_example": {"zh": "示例文件", "en": "Example"},
         "page_example_name": {"zh": "逐页配音示例.txt", "en": "page-narration-example.txt"},
         "line_example_name": {"zh": "逐行配音示例.txt", "en": "line-narration-example.txt"},
@@ -486,6 +628,7 @@ class App(ctk.CTk):
         "Xiaomeng": "晓梦", "Xiaomo": "晓墨", "Xiaoqiu": "晓秋", "Xiaorou": "晓柔",
         "Xiaorui": "晓睿", "Xiaoshuang": "晓双", "Xiaoxuan": "晓萱", "Xiaoyan": "晓颜",
         "Xiaoyou": "晓悠", "Xiaozhen": "晓甄", "Xiaochen": "晓辰", "AndrewMultilingual": "安德鲁（多语言）",
+        "Ana": "安娜", "Jeppe": "耶珀", "Abeo": "阿贝奥",
     }
 
     def _app_name(self):
@@ -504,6 +647,21 @@ class App(ctk.CTk):
     def _localized_voice_name(self, code: str) -> str:
         stem = code.rsplit("-", 1)[-1].removesuffix("Neural")
         return self.VOICE_NAMES_ZH.get(stem, stem)
+
+    def _voice_dictionary_name(self, code: str) -> str:
+        """Return a Chinese name when known, otherwise a readable voice name."""
+        stem = code.rsplit("-", 1)[-1].removesuffix("Neural")
+        if stem in self.VOICE_NAMES_ZH:
+            return self.VOICE_NAMES_ZH[stem]
+        info = self._voice_map.get(code) or {}
+        friendly = str(info.get("FriendlyName") or "").strip()
+        if friendly:
+            name = re.sub(r"^Microsoft\s+", "", friendly, flags=re.IGNORECASE)
+            name = re.sub(r"\s+Online.*$", "", name, flags=re.IGNORECASE)
+            name = name.split(" - ", 1)[0].strip()
+            if name:
+                return name
+        return stem
 
     def _localized_gender(self, gender: str) -> str:
         if self._language != "zh":
@@ -624,7 +782,8 @@ class App(ctk.CTk):
     def _rebuild_ui(self):
         text = self._textbox.get("1.0", "end-1c")
         if self._workflow_mode == "normal":
-            self._normal_text = text
+            if not self._file_batch_active:
+                self._normal_text = text
         elif self._workflow_mode == "line" and not self._pages:
             self._line_draft = text
         voice = self._selected_voice()
@@ -658,6 +817,9 @@ class App(ctk.CTk):
             self._sync_generated_status()
         else:
             self._update_page_bar()
+        if self._file_batch_active:
+            self._refresh_file_batch_tree()
+            self._load_file_item_into_controls(self._selected_file_index)
         self._update_mode_ui()
         self.after(150, self._poll_ui)
 
@@ -762,6 +924,8 @@ class App(ctk.CTk):
         title_actions = ctk.CTkFrame(title_row, fg_color="transparent")
         title_actions.pack(side="right")
         self._btn_import = ctk.CTkButton(title_actions, text=self._t("import_file"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_import_file)
+        self._btn_batch_upload = ctk.CTkButton(title_actions, text=self._t("batch_upload"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_batch_upload)
+        self._btn_batch_help = ctk.CTkButton(title_actions, text=self._t("batch_help"), width=88, height=26, font=self._font(size=12), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("muted"), command=self._show_batch_rule_help)
         self._btn_download_example = ctk.CTkButton(title_actions, text=self._t("download_example"), width=72, height=26, font=self._font(size=12), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("muted"), command=self._on_download_example)
         self._btn_prepare_lines = ctk.CTkButton(title_actions, text=self._t("prepare_lines"), width=88, height=26, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._on_prepare_lines)
         self._char_count = ctk.CTkLabel(title_actions, text=self._t("count", count=0), text_color=self._c("muted"), font=self._font(size=12))
@@ -791,6 +955,149 @@ class App(ctk.CTk):
         self._textbox.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 8))
         self._helper_label = ctk.CTkLabel(composer, text=self._t(f"helper_{self._workflow_mode}"), text_color=self._c("muted"), anchor="w", justify="left", wraplength=520, font=self._font(size=12))
         self._helper_label.grid(row=4, column=0, sticky="ew", padx=20, pady=(0, 14))
+
+        # Normal mode can temporarily replace the single text box with a
+        # file-level batch list. This is not a separate workflow tab: all
+        # right-side controls still edit the currently selected item.
+        self._batch_frame = ctk.CTkFrame(composer, fg_color="transparent")
+        self._batch_frame.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 8))
+        self._batch_frame.grid_columnconfigure(0, weight=1)
+        self._batch_frame.grid_rowconfigure(1, weight=1)
+        batch_bar = ctk.CTkFrame(self._batch_frame, fg_color="transparent")
+        batch_bar.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        batch_bar.grid_columnconfigure(2, weight=1)
+        self._btn_batch_add = ctk.CTkButton(
+            batch_bar,
+            text=self._t("batch_add_files"),
+            width=88,
+            height=28,
+            font=self._font(size=12, weight="bold"),
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("accent"),
+            command=self._on_batch_upload,
+        )
+        self._btn_batch_add.grid(row=0, column=0, padx=(0, 6))
+        self._btn_batch_remove = ctk.CTkButton(
+            batch_bar,
+            text=self._t("batch_remove"),
+            width=88,
+            height=28,
+            font=self._font(size=12),
+            fg_color="transparent",
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("muted"),
+            command=self._on_batch_remove_selected,
+        )
+        self._btn_batch_remove.grid(row=0, column=1, padx=(0, 8))
+        self._batch_summary = ctk.CTkLabel(batch_bar, text="", text_color=self._c("muted"), anchor="w", font=self._font(size=11))
+        self._batch_summary.grid(row=0, column=2, sticky="w")
+        self._btn_batch_edit = ctk.CTkButton(
+            batch_bar,
+            text=self._t("batch_edit_text"),
+            width=110,
+            height=28,
+            font=self._font(size=12),
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            command=self._on_batch_edit_selected,
+        )
+        self._btn_batch_edit.grid(row=0, column=3, padx=(8, 6))
+        self._btn_batch_exit = ctk.CTkButton(
+            batch_bar,
+            text=self._t("batch_exit"),
+            width=88,
+            height=28,
+            font=self._font(size=12),
+            fg_color="transparent",
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("muted"),
+            command=self._on_exit_file_batch,
+        )
+        self._btn_batch_exit.grid(row=0, column=4)
+
+        tree_shell = ctk.CTkFrame(
+            self._batch_frame,
+            fg_color=self._c("field"),
+            corner_radius=10,
+            border_width=1,
+            border_color=self._c("border"),
+        )
+        tree_shell.grid(row=1, column=0, sticky="nsew")
+        tree_shell.grid_columnconfigure(0, weight=1)
+        tree_shell.grid_rowconfigure(0, weight=1)
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(
+            "Batch.Treeview",
+            background=self._c("field"),
+            fieldbackground=self._c("field"),
+            foreground=self._c("text"),
+            bordercolor=self._c("border"),
+            rowheight=30,
+            font=(self._font_family, 11),
+        )
+        style.map(
+            "Batch.Treeview",
+            background=[("selected", self._c("primary"))],
+            foreground=[("selected", "#FFFFFF")],
+        )
+        style.configure(
+            "Batch.Treeview.Heading",
+            background=self._c("surface_alt"),
+            foreground=self._c("muted"),
+            bordercolor=self._c("border"),
+            font=(self._font_family, 11, "bold"),
+        )
+        self._batch_tree = ttk.Treeview(
+            tree_shell,
+            columns=("select", "number", "name", "voice", "chars", "status"),
+            show="headings",
+            style="Batch.Treeview",
+            selectmode="extended",
+        )
+        headings = (
+            ("select", "☐", 44, "center"),
+            ("number", self._t("batch_table_number"), 54, "center"),
+            ("name", self._t("batch_table_name"), 230, "w"),
+            ("voice", self._t("batch_table_voice"), 190, "w"),
+            ("chars", self._t("batch_table_chars"), 70, "center"),
+            ("status", self._t("batch_table_status"), 130, "center"),
+        )
+        for key, label, width, anchor in headings:
+            self._batch_tree.heading(key, text=label)
+            self._batch_tree.column(key, width=width, minwidth=48, anchor=anchor, stretch=key in ("name", "voice"))
+        self._batch_tree.heading("select", command=self._toggle_all_file_batch_selection)
+        self._batch_tree.column("select", minwidth=40, stretch=False)
+        scrollbar = ttk.Scrollbar(tree_shell, orient="vertical", command=self._batch_tree.yview)
+        self._batch_tree.configure(yscrollcommand=scrollbar.set)
+        self._batch_tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
+        scrollbar.grid(row=0, column=1, sticky="ns", pady=8, padx=(0, 6))
+        self._batch_tree.bind("<<TreeviewSelect>>", self._on_batch_tree_selected)
+        self._batch_tree.bind("<Control-a>", self._select_all_file_batch_rows)
+        self._batch_tree.bind("<Control-A>", self._select_all_file_batch_rows)
+        self._batch_tree.bind("<Button-1>", self._on_batch_tree_click, add="+")
+        self._batch_tree.bind("<Button-3>", self._on_batch_tree_context)
+        self._batch_tree.bind("<Double-1>", lambda _event: self._on_batch_edit_selected())
+        self._batch_context_menu = tk.Menu(self, tearoff=0)
+        self._batch_context_menu.add_command(label=self._t("batch_save_selected"), command=self._on_batch_download_selected)
+        self._batch_context_menu.add_command(label=self._t("batch_retry_selected"), command=self._on_batch_retry_selected)
+        self._batch_context_menu.add_command(label=self._t("batch_edit_text"), command=self._on_batch_edit_selected)
+        self._batch_context_menu.add_separator()
+        self._batch_context_menu.add_command(label=self._t("batch_remove"), command=self._on_batch_remove_selected)
+        self._batch_frame.grid_remove()
 
         # CTkScrollableFrame is backed by a native Canvas on Windows. Keeping its
         # scrolling surface square prevents Canvas redraw trails around rounded borders.
@@ -916,14 +1223,16 @@ class App(ctk.CTk):
         )
         self._sentence_pause_check.grid(row=0, column=0, sticky="w")
         self._pause_var = tk.StringVar(value=str(self._sentence_pause_ms))
-        duration_row = ctk.CTkFrame(pause_row, fg_color="transparent")
-        duration_row.grid(row=1, column=0, sticky="w", pady=(5, 0))
-        ctk.CTkLabel(duration_row, text=self._t("pause_duration"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(0, 8))
-        self._pause_entry = ctk.CTkEntry(duration_row, textvariable=self._pause_var, width=82, height=30, justify="right", fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
+        self._pause_duration_row = ctk.CTkFrame(pause_row, fg_color="transparent")
+        self._pause_duration_row.grid(row=1, column=0, sticky="w", pady=(5, 0))
+        self._pause_duration_label = ctk.CTkLabel(self._pause_duration_row, text=self._t("pause_duration"), text_color=self._c("muted"), font=self._font(size=11))
+        self._pause_duration_label.pack(side="left", padx=(0, 8))
+        self._pause_entry = ctk.CTkEntry(self._pause_duration_row, textvariable=self._pause_var, width=82, height=30, justify="right", fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text"), font=self._font(size=12))
         self._pause_entry.pack(side="left")
         self._pause_entry.bind("<FocusOut>", self._on_pause_changed)
         self._pause_entry.bind("<Return>", self._on_pause_changed)
-        ctk.CTkLabel(duration_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11)).pack(side="left", padx=(6, 0))
+        self._pause_unit_label = ctk.CTkLabel(self._pause_duration_row, text=self._t("pause_unit"), text_color=self._c("muted"), font=self._font(size=11))
+        self._pause_unit_label.pack(side="left", padx=(6, 0))
         self._sentence_pause_hint = ctk.CTkLabel(
             pause_row,
             text=self._t("pause_range_hint"),
@@ -954,6 +1263,7 @@ class App(ctk.CTk):
                 self._punctuation_frame, text=label, variable=var,
                 command=self._on_punctuation_changed, font=self._font(size=12),
                 text_color=self._c("text"), border_color=self._c("border"),
+                text_color_disabled=self._c("disabled_text"),
                 hover_color=self._c("card_raised"), fg_color=self._c("primary"),
                 checkbox_width=20, checkbox_height=20, border_width=2,
             )
@@ -1067,7 +1377,7 @@ class App(ctk.CTk):
         value_label.grid(row=1, column=0, sticky="ew", pady=(1, 1))
         def _on_slider_change(value):
             value_label.configure(text=formatter(value))
-            self._invalidate_generated()
+            self._on_file_item_control_changed()
 
         slider = ctk.CTkSlider(card, height=14, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=_on_slider_change)
         slider.grid(row=2, column=0, sticky="ew")
@@ -1206,6 +1516,22 @@ class App(ctk.CTk):
             self._progress.configure(mode="determinate")
             self._progress.set(percent / 100)
             self._status_label.configure(text=label)
+        elif kind == "file_progress":
+            index, item_percent, overall, written = item[1], item[2], item[3], item[4]
+            self._update_file_item_status(index, "generating", item_percent)
+            self._progress.configure(mode="determinate")
+            self._progress.set(max(0.0, min(100.0, overall)) / 100)
+            self._status_label.configure(
+                text=(
+                    f"Batch file {index + 1}/{len(self._file_items)}… "
+                    f"{item_percent:.0f}% · {written / 1024:.0f} KB"
+                    if self._language == "en"
+                    else f"批量文件 第 {index + 1}/{len(self._file_items)} 个… "
+                    f"{item_percent:.0f}% · 已接收 {written / 1024:.0f} KB"
+                )
+            )
+        elif kind == "batch_item_update":
+            self._update_file_item_status(item[1], item[2], item[3], item[4])
         elif kind == "task_done":
             self._on_task_done(item[1], item[2])
         elif kind == "batch_done":
@@ -1370,7 +1696,7 @@ class App(ctk.CTk):
             return
         self._selected_lang = code
         self._refresh_voice_selectors()
-        self._invalidate_generated()
+        self._on_file_item_control_changed()
 
     def _on_gender_changed(self, value):
         key = self._gender_map.get(value)
@@ -1378,7 +1704,7 @@ class App(ctk.CTk):
             return
         self._selected_gender = key
         self._refresh_voice_selectors()
-        self._invalidate_generated()
+        self._on_file_item_control_changed()
 
     def _on_voice_changed(self, value):
         for code in list(self._voice_map):
@@ -1396,7 +1722,7 @@ class App(ctk.CTk):
                 if label:
                     self._gender_var.set(label)
         self._update_voice_info()
-        self._invalidate_generated()
+        self._on_file_item_control_changed()
 
     def _restore_default_settings(self):
         self._selected_voice_code = DEFAULT_VOICE
@@ -1406,9 +1732,10 @@ class App(ctk.CTk):
         self._volume_var.set(DEFAULT_VOLUME)
         self._pitch_var.set(DEFAULT_PITCH)
         self._refresh_voice_selectors(preferred=DEFAULT_VOICE)
-        self._invalidate_generated()
+        self._on_file_item_control_changed()
         self._update_voice_info()
-        self._persist_ui_settings()
+        if not self._file_batch_active:
+            self._persist_ui_settings()
         self.log(self._t("original"))
 
     def _selected_voice(self) -> str:
@@ -1529,12 +1856,20 @@ class App(ctk.CTk):
             return
         self._voice_map = {v["ShortName"]: v for v in voices}
         self._groups_engine = VoiceGroupingEngine(voices)
+        self._voice_alias_index.update(
+            build_voice_alias_index(
+                voices,
+                preferred_codes=(DEFAULT_VOICE, "en-US-AnaNeural", "da-DK-JeppeNeural", "en-NG-AbeoNeural"),
+            )
+        )
         count = len(self._voice_map)
         langs = len(self._groups_engine.languages())
         self.log(f"[语音] 已加载 {count} 个可用语音（{langs} 种语言）")
         if self._btn_reload_voices:
             self._btn_reload_voices.configure(state="disabled")
         self._refresh_voice_selectors(preferred=DEFAULT_VOICE if self._selected_voice_code == DEFAULT_VOICE else None)
+        if self._file_batch_active:
+            self._load_file_item_into_controls(self._selected_file_index)
 
     # ============================================================ 文本
 
@@ -1551,6 +1886,11 @@ class App(ctk.CTk):
         new_mode = self._mode_value_to_key.get(value, "normal")
         if new_mode == self._workflow_mode:
             return
+        if self._file_batch_active and new_mode != "normal":
+            if not messagebox.askyesno(APP_NAME, self._t("batch_switch_exit_confirm")):
+                self._mode_selector.set(self._t(f"mode_{self._workflow_mode}"))
+                return
+            self._exit_file_batch(clear=True, confirm=False)
         current = self._textbox.get("1.0", "end-1c")
         if self._workflow_mode == "normal":
             self._normal_text = current
@@ -1580,9 +1920,21 @@ class App(ctk.CTk):
         if self._btn_import is None:
             return
         self._btn_import.pack_forget()
+        if self._btn_batch_upload is not None:
+            self._btn_batch_upload.pack_forget()
+        if self._btn_batch_help is not None:
+            self._btn_batch_help.pack_forget()
         self._btn_download_example.pack_forget()
         self._btn_prepare_lines.pack_forget()
         self._btn_dub_pages.grid_remove()
+        if self._workflow_mode == "normal":
+            if self._btn_batch_upload is not None:
+                self._btn_batch_upload.configure(
+                    text=self._t("batch_add_files" if self._file_batch_active else "batch_upload")
+                )
+                self._btn_batch_upload.pack(side="left", padx=(4, 0))
+            if self._btn_batch_help is not None:
+                self._btn_batch_help.pack(side="left", padx=(4, 0))
         if self._workflow_mode in ("page", "line"):
             self._btn_download_example.pack(side="left", padx=(4, 0))
             self._btn_import.pack(side="left", padx=(4, 0))
@@ -1596,23 +1948,38 @@ class App(ctk.CTk):
             )
             if self._pages:
                 self._btn_dub_pages.grid()
-        self._helper_label.configure(text=self._t(f"helper_{self._workflow_mode}"))
+        if self._file_batch_active and self._workflow_mode == "normal":
+            self._textbox.grid_remove()
+            self._batch_frame.grid()
+            self._helper_label.configure(text=self._t("helper_normal_batch"))
+        else:
+            self._batch_frame.grid_remove()
+            self._textbox.grid()
+            self._helper_label.configure(text=self._t(f"helper_{self._workflow_mode}"))
         self._btn_generate.configure(
             text=self._t(
-                "generate_line" if self._workflow_mode == "line" and self._pages
+                "batch_generate" if self._file_batch_active
+                else "generate_line" if self._workflow_mode == "line" and self._pages
                 else "generate_page" if self._workflow_mode == "page" and self._pages
                 else "generate"
             )
         )
+        self._btn_save.configure(text=self._t("batch_save_all" if self._file_batch_active else "save"))
         self._update_page_bar()
         self._update_mode_settings_ui()
+        self._refresh_file_batch_summary()
+        self._on_text_changed()
 
     def _update_mode_settings_ui(self):
         if self._mode_settings_title is None:
             return
         mode = self._workflow_mode
-        self._mode_settings_title.configure(text=self._t(f"mode_settings_{mode}"))
-        self._mode_settings_hint.configure(text=self._t(f"mode_settings_hint_{mode}"))
+        if self._file_batch_active and mode == "normal":
+            self._mode_settings_title.configure(text=self._t("mode_settings_batch"))
+            self._mode_settings_hint.configure(text=self._t("mode_settings_hint_batch"))
+        else:
+            self._mode_settings_title.configure(text=self._t(f"mode_settings_{mode}"))
+            self._mode_settings_hint.configure(text=self._t(f"mode_settings_hint_{mode}"))
         if self._line_pause_section is not None:
             if mode == "line":
                 if self._sentence_pause_row is not None:
@@ -1665,6 +2032,11 @@ class App(ctk.CTk):
         self._update_mode_ui()
 
     def _on_text_changed(self, _event=None):
+        if self._file_batch_active:
+            item = self._selected_file_item()
+            count = len(item.text) if item else 0
+            self._char_count.configure(text=self._t("count", count=count))
+            return
         text = self._textbox.get("1.0", "end-1c")
         self._char_count.configure(text=self._t("count", count=len(text)))
 
@@ -1693,6 +2065,11 @@ class App(ctk.CTk):
         return self._stall_controller
 
     def _build_cfg(self) -> TTSConfig:
+        if self._file_batch_active:
+            self._capture_file_item_from_ui()
+            item = self._selected_file_item()
+            if item is not None:
+                return replace(item.cfg)
         return TTSConfig(
             voice=self._selected_voice(),
             rate=f"{'+' if self._rate_var.get() >= 0 else ''}{self._rate_var.get()}%",
@@ -1794,6 +2171,9 @@ class App(ctk.CTk):
     # ============================================================ 按钮动作
 
     def _on_generate(self):
+        if self._file_batch_active:
+            self._on_generate_file_batch()
+            return
         self._on_pause_changed()
         cleaned = self._get_cleaned_text()
         if not cleaned:
@@ -1932,6 +2312,711 @@ class App(ctk.CTk):
         unit = "行" if self._workflow_mode == "line" else "页"
         self.log(f"[导入] 已导入 {len(pages)} {unit}：{os.path.basename(path)}")
         self._update_mode_ui()
+
+    # ============================================================ 普通模式 · 批量文件
+
+    def _selected_file_item(self) -> FileBatchItem | None:
+        if 0 <= self._selected_file_index < len(self._file_items):
+            return self._file_items[self._selected_file_index]
+        return None
+
+    def _batch_selected_indices(self) -> list[int]:
+        if self._batch_tree is None:
+            return []
+        indices = []
+        for iid in self._batch_tree.selection():
+            try:
+                index = int(iid)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < len(self._file_items):
+                indices.append(index)
+        return sorted(set(indices))
+
+    def _batch_checked_indices(self) -> list[int]:
+        return [item.index for item in self._file_items if item.selected]
+
+    def _batch_action_indices(self) -> list[int]:
+        return sorted(set(self._batch_selected_indices()) | set(self._batch_checked_indices()))
+
+    def _update_batch_select_all_heading(self):
+        if self._batch_tree is None:
+            return
+        all_selected = bool(self._file_items) and all(item.selected for item in self._file_items)
+        self._batch_tree.heading("select", text="☑" if all_selected else "☐")
+
+    def _toggle_all_file_batch_selection(self):
+        if self._busy or not self._file_items:
+            return
+        target = not all(item.selected for item in self._file_items)
+        for item in self._file_items:
+            item.selected = target
+            self._update_file_batch_row(item)
+        self._update_batch_select_all_heading()
+
+    def _on_batch_tree_click(self, event):
+        if self._batch_tree is None or self._busy:
+            return None
+        if self._batch_tree.identify_region(event.x, event.y) != "cell":
+            return None
+        if self._batch_tree.identify_column(event.x) != "#1":
+            return None
+        row = self._batch_tree.identify_row(event.y)
+        if not row:
+            return None
+        try:
+            index = int(row)
+        except (TypeError, ValueError):
+            return None
+        if not (0 <= index < len(self._file_items)):
+            return None
+        item = self._file_items[index]
+        item.selected = not item.selected
+        self._update_file_batch_row(item)
+        self._update_batch_select_all_heading()
+        return "break"
+
+    def _select_all_file_batch_rows(self, _event=None):
+        if self._batch_tree is None or self._busy:
+            return "break"
+        rows = self._batch_tree.get_children()
+        if not rows:
+            return "break"
+        self._capture_file_item_from_ui()
+        self._batch_tree.selection_set(rows)
+        focus = self._batch_tree.focus()
+        iid = focus if focus in rows else rows[0]
+        try:
+            self._selected_file_index = int(iid)
+        except (TypeError, ValueError):
+            self._selected_file_index = 0
+        self._batch_tree.focus(iid)
+        self._batch_tree.see(iid)
+        self._load_file_item_into_controls(self._selected_file_index)
+        self._update_generated_buttons()
+        return "break"
+
+    def _on_batch_upload(self):
+        if self._busy:
+            return
+        self._open_batch_import_dialog()
+
+    def _open_batch_import_dialog(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("batch_import_title"))
+        dialog.geometry("700x330")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.after(100, dialog.lift)
+
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("batch_import_title"),
+            text_color=self._c("text"),
+            font=self._font(size=19, weight="bold"),
+        ).pack(anchor="w", padx=24, pady=(22, 4))
+        ctk.CTkLabel(
+            dialog,
+            text=self._t("batch_import_hint"),
+            text_color=self._c("muted"),
+            wraplength=640,
+            justify="left",
+        ).pack(anchor="w", padx=24, pady=(0, 14))
+
+        drop_zone = ctk.CTkFrame(
+            dialog,
+            height=150,
+            corner_radius=14,
+            fg_color=self._c("field"),
+            border_width=2,
+            border_color=self._c("border"),
+        )
+        drop_zone.pack(fill="x", padx=24)
+        drop_zone.pack_propagate(False)
+        drop_text = ctk.CTkLabel(
+            drop_zone,
+            text=self._t("batch_drop_ready"),
+            text_color=self._c("accent"),
+            font=self._font(size=16, weight="bold"),
+        )
+        drop_text.place(relx=0.5, rely=0.5, anchor="center")
+
+        def add_paths(paths):
+            paths = [path for path in paths if path]
+            if paths:
+                self._add_batch_files(paths)
+                dialog.destroy()
+
+        def choose_files():
+            paths = filedialog.askopenfilenames(
+                parent=dialog,
+                title=self._t("batch_import_title"),
+                filetypes=[
+                    (
+                        "Documents (txt / md / docx / pdf)"
+                        if self._language == "en"
+                        else "文档（txt / md / docx / pdf）",
+                        "*.txt *.md *.markdown *.docx *.pdf",
+                    ),
+                    ("All files" if self._language == "en" else "所有文件", "*.*"),
+                ],
+            )
+            add_paths(list(paths or ()))
+
+        def on_drop(event):
+            try:
+                paths = list(self.tk.splitlist(event.data))
+            except Exception:
+                paths = [str(event.data)]
+            add_paths(paths)
+            try:
+                from tkinterdnd2 import COPY
+
+                return COPY
+            except Exception:  # noqa: BLE001
+                return "copy"
+
+        if not self._enable_drop_target(drop_zone, on_drop):
+            drop_text.configure(text=self._t("batch_drop_unavailable"), text_color=self._c("muted"))
+
+        ctk.CTkButton(
+            dialog,
+            text=self._t("batch_choose_files"),
+            width=150,
+            height=36,
+            fg_color=self._c("primary"),
+            hover_color=self._c("primary_hover"),
+            text_color="#FFFFFF",
+            font=self._font(size=13, weight="bold"),
+            command=choose_files,
+        ).pack(pady=20)
+
+    def _enable_drop_target(self, widget, callback) -> bool:
+        if self._dnd_available:
+            try:
+                from tkinterdnd2 import DND_FILES
+
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind("<<Drop>>", callback)
+                return True
+            except Exception:  # noqa: BLE001
+                return False
+        try:
+            from tkinterdnd2 import TkinterDnD
+
+            TkinterDnD._require(self)
+            self._dnd_ready = True
+            self._dnd_available = True
+            return self._enable_drop_target(widget, callback)
+        except Exception:  # noqa: BLE001
+            self._dnd_available = False
+            return False
+
+    def _default_file_batch_cfg(self) -> TTSConfig:
+        # File-batch belongs to Normal mode, where there is no line concept.
+        # Line-end pause is a Line-mode setting and must never leak into it.
+        return TTSConfig(
+            voice=self._selected_voice(),
+            rate=f"{'+' if self._rate_var.get() >= 0 else ''}{self._rate_var.get()}%",
+            volume=f"{'+' if self._volume_var.get() >= 0 else ''}{self._volume_var.get()}%",
+            pitch=f"{'+' if self._pitch_var.get() >= 0 else ''}{self._pitch_var.get()}Hz",
+            sentence_pause_ms=self._sentence_pause_ms if self._sentence_pause_enabled else 0,
+            sentence_pause_marks=tuple(sorted(self._sentence_pause_marks)),
+            line_pause_enabled=False,
+            line_pause_ms=0,
+        )
+
+    def _add_batch_files(self, paths):
+        imported = 0
+        skipped = 0
+        for path in paths:
+            if not path or not os.path.isfile(path):
+                skipped += 1
+                continue
+            ext = os.path.splitext(path)[1].lower()
+            if ext not in (".txt", ".md", ".markdown", ".docx", ".pdf"):
+                skipped += 1
+                self.log(self._t("batch_import_unsupported", name=os.path.basename(path)))
+                continue
+            if any(os.path.normcase(item.source_path) == os.path.normcase(path) for item in self._file_items):
+                continue
+            try:
+                raw_text = read_document_text(path)
+                parsed = parse_tts_header(raw_text)
+            except Exception as exc:  # noqa: BLE001
+                skipped += 1
+                self.log(f"[批量] 导入失败：{os.path.basename(path)}：{exc}")
+                continue
+            cfg = self._default_file_batch_cfg()
+            timeline_enabled = bool(self._timeline_enabled)
+            srt_enabled = bool(self._srt_enabled)
+            srt_fill_line_pause = False
+            if parsed.options:
+                cfg, timeline_enabled, srt_enabled, srt_fill_line_pause = self._apply_batch_header_options(
+                    parsed.options,
+                    cfg,
+                    timeline_enabled,
+                    srt_enabled,
+                    srt_fill_line_pause,
+                )
+            for warning in parsed.warnings:
+                self.log(f"[批量] {os.path.basename(path)}：{warning}")
+            item = FileBatchItem(
+                index=len(self._file_items),
+                source_path=os.path.abspath(path),
+                display_name=os.path.basename(path),
+                raw_text=raw_text,
+                text=normalize_for_tts(clean_text(parsed.text)),
+                header_line=parsed.raw_header,
+                header_options=dict(parsed.options),
+                cfg=cfg,
+                timeline_enabled=timeline_enabled,
+                srt_enabled=srt_enabled,
+                srt_fill_line_pause=srt_fill_line_pause,
+                result_name=sanitize_filename_stem(Path(path).stem),
+            )
+            self._file_items.append(item)
+            imported += 1
+
+        if not imported:
+            if skipped:
+                messagebox.showwarning(APP_NAME, self._t("batch_import_skipped", count=skipped))
+            return
+        if not self._file_batch_active:
+            self._normal_text = self._textbox.get("1.0", "end-1c")
+            self._file_batch_active = True
+            self._selected_file_index = 0
+        elif self._selected_file_index < 0:
+            self._selected_file_index = 0
+        self._refresh_file_batch_tree()
+        self._load_file_item_into_controls(self._selected_file_index)
+        self._update_mode_ui()
+        self.log(self._t("batch_imported", count=imported))
+        if skipped:
+            self.log(self._t("batch_import_skipped", count=skipped))
+
+    def _apply_batch_header_options(
+        self,
+        options: dict,
+        cfg: TTSConfig,
+        timeline_enabled: bool,
+        srt_enabled: bool,
+        srt_fill_line_pause: bool,
+    ):
+        cfg = replace(cfg)
+        if options.get("voice"):
+            resolved, warning = resolve_voice_alias(
+                options["voice"],
+                self._voice_alias_index,
+                set(self._voice_map),
+            )
+            cfg.voice = resolved
+            if warning:
+                self.log(f"[批量] {warning}")
+        if "sentence_pause_ms" in options:
+            cfg.sentence_pause_ms = int(options["sentence_pause_ms"] or 0)
+        if "sentence_pause_marks" in options:
+            cfg.sentence_pause_marks = tuple(sorted(set(options["sentence_pause_marks"] or "")))
+        if "rate" in options:
+            cfg.rate = options["rate"]
+        if "volume" in options:
+            cfg.volume = options["volume"]
+        if "pitch" in options:
+            cfg.pitch = options["pitch"]
+        if "timeline_enabled" in options:
+            timeline_enabled = bool(options["timeline_enabled"])
+        if "srt_enabled" in options:
+            srt_enabled = bool(options["srt_enabled"])
+        return cfg, timeline_enabled, srt_enabled, srt_fill_line_pause
+
+    def _load_file_item_into_controls(self, index: int):
+        item = self._file_items[index] if 0 <= index < len(self._file_items) else None
+        if item is None:
+            return
+        self._loading_file_item = True
+        try:
+            code = item.cfg.voice
+            if code in self._voice_map:
+                info = self._voice_map.get(code) or {}
+                locale = str(info.get("Locale") or "")
+                language = locale.split("-", 1)[0].lower()
+                gender = str(info.get("Gender") or "")
+                if language:
+                    self._selected_lang = language
+                if gender:
+                    self._selected_gender = gender
+                self._refresh_voice_selectors(preferred=code)
+            else:
+                self._selected_voice_code = code
+                self._voice_var.set(code)
+            self._rate_var.set(self._rate_from_cfg(item.cfg.rate))
+            self._volume_var.set(self._rate_from_cfg(item.cfg.volume))
+            self._pitch_var.set(self._pitch_from_cfg(item.cfg.pitch))
+            self._pause_var.set(str(item.cfg.sentence_pause_ms))
+            if item.cfg.sentence_pause_ms > 0:
+                self._sentence_pause_check.select()
+            else:
+                self._sentence_pause_check.deselect()
+            self._sentence_pause_enabled = item.cfg.sentence_pause_ms > 0
+            self._sentence_pause_marks = set(item.cfg.sentence_pause_marks or ())
+            for key, (var, values, _check) in self._punctuation_checks.items():
+                var.set(bool(set(values) & self._sentence_pause_marks))
+            self._line_pause_var.set("0")
+            self._line_pause_check.deselect()
+            self._line_pause_enabled = False
+            self._timeline_var.set(item.timeline_enabled)
+            self._srt_var.set(item.srt_enabled)
+            self._srt_fill_var.set(False)
+            self._set_sentence_pause_controls_enabled(self._sentence_pause_enabled)
+            self._set_line_pause_controls_enabled(self._line_pause_enabled)
+            self._update_srt_fill_visibility()
+        finally:
+            self._loading_file_item = False
+        self._on_text_changed()
+        self._refresh_file_batch_summary()
+
+    def _rate_from_cfg(self, value: str) -> int:
+        match = re.search(r"([+-]?\d+)", str(value or "0"))
+        return int(match.group(1)) if match else 0
+
+    def _pitch_from_cfg(self, value: str) -> int:
+        match = re.search(r"([+-]?\d+)", str(value or "0"))
+        return int(match.group(1)) if match else 0
+
+    def _capture_file_item_from_ui(self):
+        if not self._file_batch_active or self._loading_file_item:
+            return
+        item = self._selected_file_item()
+        if item is None:
+            return
+        previous = (
+            item.cfg.voice,
+            item.cfg.rate,
+            item.cfg.volume,
+            item.cfg.pitch,
+            item.cfg.sentence_pause_ms,
+            tuple(item.cfg.sentence_pause_marks),
+            item.cfg.line_pause_enabled,
+            item.cfg.line_pause_ms,
+            item.timeline_enabled,
+            item.srt_enabled,
+            item.srt_fill_line_pause,
+        )
+        voice_value = self._voice_var.get()
+        selected_voice = self._selected_voice_code or DEFAULT_VOICE
+        for code in list(self._voice_map):
+            if self._display_name(code) == voice_value:
+                selected_voice = code
+                break
+        item.cfg.voice = selected_voice
+        item.cfg.rate = f"{'+' if self._rate_var.get() >= 0 else ''}{self._rate_var.get()}%"
+        item.cfg.volume = f"{'+' if self._volume_var.get() >= 0 else ''}{self._volume_var.get()}%"
+        item.cfg.pitch = f"{'+' if self._pitch_var.get() >= 0 else ''}{self._pitch_var.get()}Hz"
+        item.cfg.sentence_pause_ms = self._sentence_pause_ms if self._sentence_pause_enabled else 0
+        item.cfg.sentence_pause_marks = tuple(sorted(self._sentence_pause_marks))
+        item.cfg.line_pause_enabled = False
+        item.cfg.line_pause_ms = 0
+        item.timeline_enabled = bool(self._timeline_var.get())
+        item.srt_enabled = bool(self._srt_var.get())
+        item.srt_fill_line_pause = False
+        current = (
+            item.cfg.voice,
+            item.cfg.rate,
+            item.cfg.volume,
+            item.cfg.pitch,
+            item.cfg.sentence_pause_ms,
+            tuple(item.cfg.sentence_pause_marks),
+            item.cfg.line_pause_enabled,
+            item.cfg.line_pause_ms,
+            item.timeline_enabled,
+            item.srt_enabled,
+            item.srt_fill_line_pause,
+        )
+        if current != previous:
+            self._mark_file_item_dirty(item)
+            self._update_file_batch_row(item)
+            self._refresh_file_batch_summary()
+
+    def _on_file_item_control_changed(self):
+        if self._file_batch_active:
+            self._capture_file_item_from_ui()
+        else:
+            self._invalidate_generated()
+
+    def _mark_file_item_dirty(self, item: FileBatchItem):
+        item.status = "pending"
+        item.progress = 0.0
+        item.output_path = ""
+        item.timeline = None
+        item.error = ""
+
+    def _refresh_file_batch_tree(self):
+        tree = self._batch_tree
+        if tree is None:
+            return
+        for row in tree.get_children():
+            tree.delete(row)
+        for item in self._file_items:
+            voice = self._display_name(item.cfg.voice) if item.cfg.voice in self._voice_map else item.cfg.voice
+            tree.insert(
+                "",
+                "end",
+                iid=str(item.index),
+                values=(
+                    "☑" if item.selected else "☐",
+                    item.index + 1,
+                    item.display_name,
+                    voice,
+                    len(item.text),
+                    self._file_item_status_text(item),
+                ),
+            )
+        if 0 <= self._selected_file_index < len(self._file_items):
+            iid = str(self._selected_file_index)
+            if tree.exists(iid):
+                tree.selection_set(iid)
+                tree.focus(iid)
+                tree.see(iid)
+        self._update_batch_select_all_heading()
+        self._refresh_file_batch_summary()
+
+    def _update_file_batch_row(self, item: FileBatchItem):
+        tree = self._batch_tree
+        if tree is None or not tree.exists(str(item.index)):
+            return
+        voice = self._display_name(item.cfg.voice) if item.cfg.voice in self._voice_map else item.cfg.voice
+        tree.item(
+            str(item.index),
+            values=(
+                "☑" if item.selected else "☐",
+                item.index + 1,
+                item.display_name,
+                voice,
+                len(item.text),
+                self._file_item_status_text(item),
+            ),
+        )
+
+    def _sync_file_batch_results(self):
+        """Keep the result navigator aligned after rows are removed or reindexed."""
+        self._generated_pages = {
+            item.index + 1: {
+                "page": item.index + 1,
+                "title": item.display_name,
+                "text": item.text,
+                "audio": item.output_path,
+                "timeline": item.timeline,
+                "file_index": item.index,
+            }
+            for item in self._file_items
+            if item.status == "done" and item.output_path
+        }
+
+    def _refresh_file_batch_summary(self):
+        if self._batch_summary is None:
+            return
+        total = len(self._file_items)
+        done = sum(1 for item in self._file_items if item.status == "done")
+        failed = sum(1 for item in self._file_items if item.status == "failed")
+        self._batch_summary.configure(text=self._t("batch_summary", total=total, done=done, failed=failed))
+
+    def _file_item_status_text(self, item: FileBatchItem) -> str:
+        if item.status == "done":
+            return self._t("batch_status_done")
+        if item.status == "generating":
+            return self._t("batch_status_generating", progress=item.progress)
+        if item.status == "failed":
+            return self._t("batch_status_failed")
+        if item.status == "canceled":
+            return self._t("batch_status_canceled")
+        return self._t("batch_status_pending")
+
+    def _update_file_item_status(self, index, status, progress=0.0, error=""):
+        if not (0 <= index < len(self._file_items)):
+            return
+        item = self._file_items[index]
+        item.status = status
+        item.progress = float(progress or 0.0)
+        if error:
+            item.error = str(error)
+        if self._batch_tree is not None and self._batch_tree.exists(str(index)):
+            self._batch_tree.set(str(index), "status", self._file_item_status_text(item))
+        if index == self._selected_file_index:
+            self._sync_generated_status()
+        self._refresh_file_batch_summary()
+
+    def _on_batch_tree_selected(self, _event=None):
+        if self._batch_tree is None or self._busy:
+            return
+        selected = self._batch_tree.selection()
+        if not selected:
+            return
+        focus = self._batch_tree.focus()
+        iid = focus if focus in selected else selected[0]
+        try:
+            index = int(iid)
+        except (TypeError, ValueError):
+            return
+        if index == self._selected_file_index:
+            return
+        self._capture_file_item_from_ui()
+        self._selected_file_index = index
+        self._load_file_item_into_controls(index)
+        self._update_generated_buttons()
+
+    def _on_batch_tree_context(self, event):
+        if self._batch_tree is None or self._busy:
+            return
+        row = self._batch_tree.identify_row(event.y)
+        if not row:
+            return
+        self._capture_file_item_from_ui()
+        if row not in self._batch_tree.selection():
+            self._batch_tree.selection_set(row)
+        self._batch_tree.focus(row)
+        try:
+            self._selected_file_index = int(row)
+        except (TypeError, ValueError):
+            return
+        self._load_file_item_into_controls(self._selected_file_index)
+        item = self._selected_file_item()
+        can_download = bool(item and item.status == "done" and item.output_path and os.path.exists(item.output_path))
+        action_indices = self._batch_action_indices() or [self._selected_file_index]
+        can_retry = any(
+            0 <= index < len(self._file_items)
+            and self._file_items[index].status != "done"
+            for index in action_indices
+        )
+        if self._batch_context_menu is not None:
+            try:
+                self._batch_context_menu.entryconfigure(0, state="normal" if can_download else "disabled")
+                self._batch_context_menu.entryconfigure(1, state="normal" if can_retry else "disabled")
+                self._batch_context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self._batch_context_menu.grab_release()
+
+    def _on_batch_edit_selected(self):
+        if self._busy:
+            return
+        item = self._selected_file_item()
+        if item is None:
+            return
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("batch_text_editor_title"))
+        dialog.geometry("820x620")
+        dialog.minsize(680, 480)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(
+            dialog,
+            text=f"{item.display_name} · {self._t('batch_text_editor_title')}",
+            text_color=self._c("text"),
+            font=self._font(size=17, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=20, pady=(18, 8))
+        editor = ctk.CTkTextbox(
+            dialog,
+            wrap="word",
+            fg_color=self._c("field"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            font=self._font(size=13),
+        )
+        editor.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 12))
+        editor.insert("1.0", item.raw_text)
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.grid(row=2, column=0, sticky="e", padx=20, pady=(0, 16))
+
+        def save():
+            raw_text = editor.get("1.0", "end-1c")
+            parsed = parse_tts_header(raw_text)
+            cfg, timeline_enabled, srt_enabled, srt_fill_line_pause = self._apply_batch_header_options(
+                parsed.options,
+                replace(item.cfg),
+                item.timeline_enabled,
+                item.srt_enabled,
+                item.srt_fill_line_pause,
+            )
+            item.raw_text = raw_text
+            item.text = normalize_for_tts(clean_text(parsed.text))
+            item.header_line = parsed.raw_header
+            item.header_options = dict(parsed.options)
+            item.cfg = cfg
+            item.timeline_enabled = timeline_enabled
+            item.srt_enabled = srt_enabled
+            item.srt_fill_line_pause = srt_fill_line_pause
+            for warning in parsed.warnings:
+                self.log(f"[批量] {item.display_name}：{warning}")
+            self._mark_file_item_dirty(item)
+            self._refresh_file_batch_tree()
+            self._load_file_item_into_controls(item.index)
+            dialog.destroy()
+
+        ctk.CTkButton(buttons, text=self._t("batch_cancel"), width=88, command=dialog.destroy).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(buttons, text=self._t("batch_save"), width=88, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), text_color="#FFFFFF", command=save).pack(side="left")
+
+    def _on_batch_remove_selected(self):
+        if self._busy:
+            return
+        selected = self._batch_action_indices()
+        if not selected and self._selected_file_item() is not None:
+            selected = [self._selected_file_index]
+        if not selected:
+            return
+        self._capture_file_item_from_ui()
+        anchor = self._selected_file_index
+        self._stop_playback()
+        for index in reversed(selected):
+            item = self._file_items.pop(index)
+            try:
+                if item.output_path and os.path.exists(item.output_path):
+                    os.unlink(item.output_path)
+            except OSError:
+                pass
+        for index, entry in enumerate(self._file_items):
+            entry.index = index
+        if self._file_items:
+            self._selected_file_index = min(max(anchor, 0), len(self._file_items) - 1)
+            self._sync_file_batch_results()
+            self._refresh_file_batch_tree()
+            self._load_file_item_into_controls(self._selected_file_index)
+        else:
+            self._file_batch_active = False
+            self._selected_file_index = -1
+            self._generated_pages = {}
+            self._batch_mode = None
+            self._cleanup_file_batch()
+            self._update_mode_ui()
+        self._update_generated_buttons()
+
+    def _on_exit_file_batch(self):
+        self._exit_file_batch(clear=True, confirm=True)
+
+    def _exit_file_batch(self, clear=True, confirm=True):
+        if self._busy:
+            return
+        if confirm and not messagebox.askyesno(APP_NAME, self._t("batch_exit_confirm")):
+            return
+        self._stop_playback()
+        self._file_batch_active = False
+        self._selected_file_index = -1
+        if clear:
+            self._file_items = []
+            self._cleanup_file_batch()
+        if self._batch_tree is not None:
+            for row in self._batch_tree.get_children():
+                self._batch_tree.delete(row)
+        self._replace_textbox(self._normal_text)
+        self._update_mode_ui()
+        self._update_generated_buttons()
+
+    def _cleanup_file_batch(self):
+        if self._file_batch_dir and os.path.isdir(self._file_batch_dir):
+            shutil.rmtree(self._file_batch_dir, ignore_errors=True)
+        self._file_batch_dir = None
 
     def _load_page_into_ui(self, index):
         if not self._pages:
@@ -2147,6 +3232,9 @@ class App(ctk.CTk):
         self._ui_q.put(("batch_done", {"results": results, "canceled": canceled, "mode": batch_mode}))
 
     def _on_batch_done(self, payload):
+        if payload.get("mode") == "file":
+            self._on_file_batch_done(payload)
+            return
         self._busy = False
         self._set_busy_ui(False)
         results = payload.get("results") or []
@@ -2172,6 +3260,361 @@ class App(ctk.CTk):
             self.log(f"[{tag}] {tag}配音完成：{len(results)} {unit}，可试听或保存下载。")
         self._update_generated_buttons()
         self._update_page_bar()
+
+    def _on_generate_file_batch(self):
+        if self._busy:
+            return
+        if not self._file_items:
+            messagebox.showinfo(APP_NAME, self._t("batch_no_files"))
+            return
+        targets = [item for item in self._file_items if item.status != "done"]
+        if not targets:
+            messagebox.showinfo(APP_NAME, self._t("batch_all_complete"))
+            return
+        self._start_file_batch(targets)
+
+    def _on_batch_retry_selected(self):
+        if self._busy or not self._file_items:
+            return
+        selected = self._batch_action_indices()
+        if not selected and self._selected_file_item() is not None:
+            selected = [self._selected_file_index]
+        targets = [
+            self._file_items[index]
+            for index in selected
+            if 0 <= index < len(self._file_items)
+            and self._file_items[index].status != "done"
+        ]
+        if not targets:
+            messagebox.showinfo(APP_NAME, self._t("batch_retry_none"))
+            return
+        self._start_file_batch(targets)
+
+    def _start_file_batch(self, targets: list[FileBatchItem]):
+        if self._busy or not targets:
+            return
+        self._on_pause_changed()
+        self._capture_file_item_from_ui()
+        self._stop_playback()
+        if not self._file_batch_dir or not os.path.isdir(self._file_batch_dir):
+            self._file_batch_dir = tempfile.mkdtemp(prefix="edgetts_file_batch_")
+
+        # Keep completed files and their ZIP-ready metadata intact. Only the
+        # selected incomplete rows are reset and submitted to the worker.
+        target_ids = {id(item) for item in targets}
+        used_names: dict[str, int] = {}
+        for item in self._file_items:
+            if id(item) in target_ids:
+                continue
+            base = sanitize_filename_stem(item.result_name or Path(item.source_path).stem)
+            used_names[base.lower()] = max(used_names.get(base.lower(), 0), 1)
+
+        jobs = []
+        for item in targets:
+            base = sanitize_filename_stem(item.result_name or Path(item.source_path).stem)
+            count = used_names.get(base.lower(), 0)
+            used_names[base.lower()] = count + 1
+            if count:
+                base = f"{base}_{count + 1}"
+            item.result_name = base
+            item.status = "pending"
+            item.progress = 0.0
+            item.timeline = None
+            item.error = ""
+            item.output_path = os.path.join(self._file_batch_dir, base + ".mp3")
+            jobs.append(
+                (
+                    item.index,
+                    item.text,
+                    replace(item.cfg),
+                    item.timeline_enabled,
+                    item.srt_enabled,
+                    item.srt_fill_line_pause,
+                    item.output_path,
+                    item.display_name,
+                    item.result_name,
+                )
+            )
+        self._refresh_file_batch_tree()
+        self._busy = True
+        self._cancel_event = threading.Event()
+        self._set_busy_ui(True)
+        self._progress.configure(mode="determinate")
+        self._progress.set(0)
+        self._status_label.configure(
+            text="Starting file batch…" if self._language == "en" else "正在准备批量文件…",
+            text_color="#e0af68",
+        )
+        skipped = len(self._file_items) - len(jobs)
+        if skipped:
+            self.log(self._t("batch_skipped_complete", count=skipped))
+        self.log(f"[批量] 开始生成 {len(jobs)} 个文件。")
+        threading.Thread(
+            target=self._worker_file_batch,
+            args=(jobs,),
+            daemon=True,
+        ).start()
+
+    def _worker_file_batch(self, jobs):
+        total = len(jobs)
+        results = []
+        failed = []
+        canceled = False
+        rate_limited = False
+
+        def pace(seconds: float) -> bool:
+            deadline = time.perf_counter() + max(0.0, seconds)
+            while True:
+                if self._cancel_event.is_set():
+                    return False
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
+                    return True
+                time.sleep(min(0.25, remaining))
+
+        def generate_item(pos, job):
+            nonlocal canceled, rate_limited
+            if self._cancel_event.is_set():
+                canceled = True
+                return False
+            index, text, cfg, timeline_enabled, srt_enabled, srt_fill, output, display_name, result_name = job
+            self._ui_q.put(("batch_item_update", index, "generating", 0.0, ""))
+            if not str(text or "").strip():
+                message = "文件中没有可朗读的文字"
+                self._ui_q.put(("batch_item_update", index, "failed", 0.0, message))
+                self._ui_q.put(("log", f"[批量] {display_name} 无可用文字，已跳过。"))
+                results.append({
+                    "index": index,
+                    "status": "failed",
+                    "error": message,
+                    "display_name": display_name,
+                })
+                return False
+            controller = self._make_controller()
+            engine = TTSEngine(
+                on_log=lambda message: self._ui_q.put(("log", f"[{display_name}] {message}")),
+                on_progress=lambda percent, written, pos=pos: self._ui_q.put(
+                    (
+                        "file_progress",
+                        index,
+                        percent,
+                        (pos - 1 + percent / 100.0) / total * 100,
+                        written,
+                    )
+                ),
+                controller=controller,
+                cancel_event=self._cancel_event,
+            )
+            try:
+                result = engine.generate(text, output, cfg)
+            except Exception as exc:  # noqa: BLE001
+                result = {"status": "error", "error": str(exc)}
+            if self._cancel_event.is_set():
+                canceled = True
+                return False
+            if result.get("status") != "done":
+                if result.get("http_status") == 429:
+                    rate_limited = True
+                message = result.get("error", "未知错误")
+                self._ui_q.put(("batch_item_update", index, "failed", 0.0, message))
+                self._ui_q.put(("log", f"[批量] {display_name} 生成失败：{message}"))
+                results.append({
+                    "index": index,
+                    "status": "failed",
+                    "error": message,
+                    "display_name": display_name,
+                })
+                return False
+            size_kb = os.path.getsize(output) / 1024 if os.path.exists(output) else 0
+            self._ui_q.put(("batch_item_update", index, "done", 100.0, ""))
+            self._ui_q.put(("log", f"[批量] {display_name} 完成（{size_kb:.0f} KB）。"))
+            results.append({
+                "index": index,
+                "status": "done",
+                "audio": output,
+                "timeline": getattr(engine, "timeline", None),
+                "text": text,
+                "timeline_enabled": timeline_enabled,
+                "srt_enabled": srt_enabled,
+                "srt_fill_line_pause": srt_fill,
+                "display_name": display_name,
+                "result_name": result_name,
+            })
+            return True
+
+        for pos, job in enumerate(jobs, start=1):
+            if not generate_item(pos, job):
+                if canceled:
+                    break
+                failed.append((pos, job))
+            if not pace(BATCH_ITEM_DELAY):
+                canceled = True
+                break
+        if failed and not canceled:
+            cooldown = BATCH_RATE_LIMIT_COOLDOWN if rate_limited else BATCH_RETRY_COOLDOWN
+            self._ui_q.put(("log", f"[批量] 等待 {cooldown:g} 秒后重试失败文件（共 {len(failed)} 个）…"))
+            if pace(cooldown):
+                for pos, job in failed:
+                    if not generate_item(pos, job) and canceled:
+                        break
+                    if not pace(BATCH_ITEM_DELAY):
+                        canceled = True
+                        break
+        self._ui_q.put(("batch_done", {
+            "mode": "file",
+            "results": results,
+            "canceled": canceled,
+            "total": total,
+        }))
+
+    def _on_file_batch_done(self, payload):
+        self._busy = False
+        self._set_busy_ui(False)
+        results = payload.get("results") or []
+        by_index = {int(result.get("index")): result for result in results}
+        for item in self._file_items:
+            result = by_index.get(item.index)
+            if not result:
+                if item.status == "generating":
+                    item.status = "pending"
+                    item.progress = 0.0
+                continue
+            item.status = result.get("status") or "failed"
+            if item.status == "done":
+                item.progress = 100.0
+                item.output_path = result.get("audio") or item.output_path
+                item.timeline = result.get("timeline")
+                item.text = result.get("text") or item.text
+                item.error = ""
+            else:
+                item.progress = 0.0
+                item.error = result.get("error", "")
+        completed = [item for item in self._file_items if item.status == "done"]
+        self._sync_file_batch_results()
+        self._batch_mode = "file"
+        self._refresh_file_batch_tree()
+        if payload.get("canceled"):
+            self._progress.set(1.0 if completed else 0)
+            self._status_label.configure(text=self._t("stopped"), text_color="#e0af68")
+            self.log(f"[批量] 已停止（完成 {len(completed)}/{len(self._file_items)} 个文件）。")
+        elif completed:
+            self._progress.set(1.0)
+            self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
+            self.log(f"[批量] 完成 {len(completed)}/{len(self._file_items)} 个文件，可打包下载或右键单独下载。")
+        else:
+            self._progress.set(0)
+            self._status_label.configure(text=self._t("failed"), text_color="#f7768e")
+            self.log("[批量] 未生成任何文件。")
+        self._update_generated_buttons()
+        self._sync_generated_status()
+
+    def _save_file_batch_bundle(self):
+        completed = [item for item in self._file_items if item.status == "done" and item.output_path and os.path.exists(item.output_path)]
+        if not completed:
+            messagebox.showinfo(APP_NAME, self._t("batch_none_complete"))
+            return
+        pending = len(self._file_items) - len(completed)
+        if pending and not messagebox.askyesno(
+            APP_NAME,
+            self._t("batch_partial_confirm", count=pending),
+        ):
+            return
+        default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        path = filedialog.asksaveasfilename(
+            title=self._t("batch_zip_title"),
+            defaultextension=".zip",
+            filetypes=[(self._t("batch_zip_filetype"), "*.zip")],
+            initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
+            initialfile=default_filename().replace(".mp3", "_files.zip"),
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
+        try:
+            self._write_file_batch_zip(path, completed, include_batch_manifest=True)
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"保存失败：{exc}")
+            return
+        self.log(f"[保存] 批量文件压缩包已保存：{path}")
+        self._maybe_open_folder(path)
+
+    def _on_batch_download_selected(self):
+        item = self._selected_file_item()
+        if item is None:
+            return
+        if item.status != "done" or not item.output_path or not os.path.exists(item.output_path):
+            messagebox.showinfo(APP_NAME, self._t("batch_only_complete"))
+            return
+        self._save_file_batch_item(item)
+
+    def _save_file_batch_item(self, item: FileBatchItem):
+        default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        path = filedialog.asksaveasfilename(
+            title=self._t("batch_single_zip_title"),
+            defaultextension=".zip",
+            filetypes=[(self._t("batch_zip_filetype"), "*.zip")],
+            initialdir=default_dir if os.path.isdir(default_dir) else os.path.expanduser("~"),
+            initialfile=f"{item.result_name or Path(item.source_path).stem}.zip",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
+        try:
+            self._write_file_batch_zip(path, [item], include_batch_manifest=False)
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"保存失败：{exc}")
+            return
+        self.log(f"[保存] 单文件配音压缩包已保存：{path}")
+        self._maybe_open_folder(path)
+
+    def _write_file_batch_zip(self, path: str, items: list[FileBatchItem], include_batch_manifest: bool):
+        manifest = {
+            "version": 1,
+            "kind": "file_batch",
+            "engine": "edge-tts",
+            "items": [],
+        }
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for item in items:
+                base = item.result_name or sanitize_filename_stem(Path(item.source_path).stem)
+                audio_name = base + ".mp3"
+                archive.write(item.output_path, arcname=audio_name)
+                item_payload = {
+                    "source_file": item.display_name,
+                    "audio": audio_name,
+                    "voice": item.cfg.voice,
+                    "rate": item.cfg.rate,
+                    "volume": item.cfg.volume,
+                    "pitch": item.cfg.pitch,
+                    "sentence_pause_ms": item.cfg.sentence_pause_ms,
+                    "sentence_pause_marks": list(item.cfg.sentence_pause_marks),
+                    "timeline_enabled": item.timeline_enabled,
+                    "srt_enabled": item.srt_enabled,
+                    "text": item.text,
+                }
+                if item.timeline_enabled and item.timeline:
+                    timeline_name = base + ".timeline.json"
+                    archive.writestr(
+                        timeline_name,
+                        json.dumps(item.timeline, ensure_ascii=False, indent=2),
+                    )
+                    item_payload["timeline"] = timeline_name
+                if item.srt_enabled and item.timeline:
+                    srt = timeline_to_srt(
+                        item.timeline,
+                        fill_gaps=item.srt_fill_line_pause,
+                    )
+                    if srt:
+                        srt_name = base + ".srt"
+                        archive.writestr(srt_name, srt)
+                        item_payload["subtitle"] = srt_name
+                manifest["items"].append(item_payload)
+            if include_batch_manifest:
+                archive.writestr("batch.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+            else:
+                archive.writestr("metadata.json", json.dumps(manifest["items"][0], ensure_ascii=False, indent=2))
 
     def _save_pages_bundle(self):
         entries = sorted(self._generated_pages.values(), key=lambda e: e.get("page", e.get("index", 0)))
@@ -2237,6 +3680,25 @@ class App(ctk.CTk):
         self._maybe_open_folder(path)
 
     def _on_play(self):
+        if self._file_batch_active:
+            item = self._selected_file_item()
+            if item is None or item.status != "done" or not item.output_path or not os.path.exists(item.output_path):
+                messagebox.showinfo(APP_NAME, self._t("no_audio"))
+                return
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                self._stop_playback()
+                self.log("[试听] 已停止播放。")
+                return
+            self.log("[试听] 开始播放已生成的音频…")
+            self._play_audio(item.output_path)
+            self._set_play_button_state(True)
+            self._schedule_playback_poll()
+            if item.timeline_enabled and item.timeline:
+                self._generated_timeline = item.timeline
+                self._highlight_ranges = []
+                self._highlight_running = True
+                self.after(150, self._tick_highlight)
+            return
         page_entry = self._current_page_generated()
         target = page_entry["audio"] if page_entry else self._generated_path
         if not target or not os.path.exists(target):
@@ -2413,7 +3875,24 @@ class App(ctk.CTk):
         refresh_entry()
 
     def _open_result_preview(self):
-        if self._generated_pages:
+        if self._file_batch_active:
+            entries = [
+                {
+                    "page": item.index + 1,
+                    "title": item.display_name,
+                    "text": item.text,
+                    "audio": item.output_path,
+                    "timeline": item.timeline,
+                    "file_index": item.index,
+                }
+                for item in self._file_items
+                if item.status == "done" and item.output_path and os.path.exists(item.output_path)
+            ]
+            if not entries:
+                messagebox.showinfo(APP_NAME, self._t("batch_none_complete"))
+                return
+            self._batch_mode = "file"
+        elif self._generated_pages:
             entries = sorted(self._generated_pages.values(), key=lambda e: e.get("page", 0))
         elif self._generated_path and os.path.exists(self._generated_path):
             entries = [{"page": 1, "text": self._generated_text or self._textbox.get("1.0", "end-1c"), "audio": self._generated_path, "timeline": self._generated_timeline}]
@@ -2438,8 +3917,8 @@ class App(ctk.CTk):
         switch.grid(row=0, column=0, padx=10, pady=8)
         summary = ctk.CTkLabel(toolbar, text="", text_color=self._c("muted"), anchor="w")
         summary.grid(row=0, column=2, sticky="w", padx=10)
-        ctk.CTkButton(toolbar, text=self._t("result_regenerate_all"), width=126, height=30, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=self._on_dub_pages).grid(row=0, column=3, padx=5, pady=8)
-        ctk.CTkButton(toolbar, text=self._t("result_export_zip"), width=118, height=30, fg_color=self._c("star"), hover_color=self._c("star_hover"), text_color=self._c("warning"), command=self._save_pages_bundle).grid(row=0, column=4, padx=(0, 10), pady=8)
+        ctk.CTkButton(toolbar, text=self._t("result_regenerate_all"), width=126, height=30, fg_color=self._c("primary"), hover_color=self._c("primary_hover"), command=self._on_generate_file_batch if self._file_batch_active else self._on_dub_pages).grid(row=0, column=3, padx=5, pady=8)
+        ctk.CTkButton(toolbar, text=self._t("result_export_zip"), width=118, height=30, fg_color=self._c("star"), hover_color=self._c("star_hover"), text_color=self._c("warning"), command=self._save_file_batch_bundle if self._file_batch_active else self._save_pages_bundle).grid(row=0, column=4, padx=(0, 10), pady=8)
         table = ctk.CTkScrollableFrame(dialog, fg_color=self._c("surface"), corner_radius=10, border_width=1, border_color=self._c("border"))
         table.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 12))
         table.grid_columnconfigure(1, weight=4)
@@ -2576,6 +4055,40 @@ class App(ctk.CTk):
             if not text:
                 messagebox.showwarning(APP_NAME, self._t("empty"), parent=dialog)
                 return
+            if self._file_batch_active:
+                file_index = int(entry.get("file_index", int(entry.get("page", 1)) - 1))
+                if not (0 <= file_index < len(self._file_items)):
+                    return
+                item = self._file_items[file_index]
+                item.text = normalize_for_tts(clean_text(text))
+                entry["text"] = item.text
+                if self._busy:
+                    return
+                self._busy = True
+                self._cancel_event = threading.Event()
+                self._set_busy_ui(True)
+                out_dir = self._file_batch_dir or tempfile.mkdtemp(prefix="edgetts_file_review_")
+                self._file_batch_dir = out_dir
+                output = os.path.join(out_dir, f"{item.result_name or file_index + 1}.mp3")
+                cfg = replace(item.cfg)
+
+                def file_worker():
+                    try:
+                        engine = TTSEngine(
+                            on_log=lambda msg: self._ui_q.put(("log", msg)),
+                            on_progress=lambda p, w: None,
+                            controller=self._make_controller(),
+                            cancel_event=self._cancel_event,
+                        )
+                        result = engine.generate(item.text, output, cfg)
+                        result["timeline"] = getattr(engine, "timeline", None)
+                        result["text"] = item.text
+                    except Exception as exc:  # noqa: BLE001
+                        result = {"status": "error", "error": str(exc)}
+                    self._ui_q.put(("result_row_done", file_index + 1, result))
+
+                threading.Thread(target=file_worker, daemon=True).start()
+                return
             if not self._generated_pages:
                 self._replace_textbox(text)
                 self._on_generate()
@@ -2644,6 +4157,25 @@ class App(ctk.CTk):
     def _on_result_row_done(self, page, result):
         self._busy = False
         self._set_busy_ui(False)
+        if self._file_batch_active and 0 < int(page) <= len(self._file_items):
+            item = self._file_items[int(page) - 1]
+            if result.get("status") == "done":
+                item.status = "done"
+                item.progress = 100.0
+                item.output_path = result.get("path") or item.output_path
+                item.timeline = result.get("timeline")
+                item.text = result.get("text") or item.text
+                item.error = ""
+                self._refresh_file_batch_tree()
+                self.log(f"[结果] 第 {page} 个文件已重新生成。")
+                if self._result_preview_refresh:
+                    self._result_preview_refresh()
+            else:
+                item.status = "failed"
+                item.error = result.get("error", "")
+                self._refresh_file_batch_tree()
+                messagebox.showerror(APP_NAME, f"生成失败：{result.get('error', '未知错误')}")
+            return
         entry = self._generated_pages.get(page)
         if result.get("status") == "done" and entry:
             entry["audio"] = result.get("path") or entry.get("audio")
@@ -2658,6 +4190,9 @@ class App(ctk.CTk):
             messagebox.showerror(APP_NAME, f"生成失败：{result.get('error', '未知错误')}")
 
     def _on_save(self):
+        if self._file_batch_active:
+            self._save_file_batch_bundle()
+            return
         if self._generated_pages:
             self._save_pages_bundle()
             return
@@ -2798,23 +4333,29 @@ class App(ctk.CTk):
 
     def _toggle_timeline(self):
         self._timeline_enabled = bool(self._timeline_var.get())
-        self._settings["timeline_json"] = self._timeline_enabled
-        self._save_settings()
+        if not self._file_batch_active:
+            self._settings["timeline_json"] = self._timeline_enabled
+            self._save_settings()
         if not self._timeline_enabled:
             self._clear_highlight()
+        self._on_file_item_control_changed()
         self.log(self._t("timeline_on") if self._timeline_enabled else self._t("timeline_off"))
 
     def _toggle_srt(self):
         self._srt_enabled = bool(self._srt_var.get())
-        self._settings["srt_subtitles"] = self._srt_enabled
-        self._save_settings()
+        if not self._file_batch_active:
+            self._settings["srt_subtitles"] = self._srt_enabled
+            self._save_settings()
         self._update_srt_fill_visibility()
+        self._on_file_item_control_changed()
 
     def _toggle_srt_fill(self):
         """Fill subtitle gaps on export without touching the generated audio."""
         self._srt_fill_line_pause = bool(self._srt_fill_var.get())
-        self._settings["srt_fill_line_pause"] = self._srt_fill_line_pause
-        self._save_settings()
+        if not self._file_batch_active:
+            self._settings["srt_fill_line_pause"] = self._srt_fill_line_pause
+            self._save_settings()
+        self._on_file_item_control_changed()
         self.log(
             "[字幕] 已开启行末停顿填充，导出的 SRT 时间轴不再有空隙。"
             if self._srt_fill_line_pause
@@ -2857,29 +4398,75 @@ class App(ctk.CTk):
 
     def _toggle_sentence_pause(self):
         self._sentence_pause_enabled = bool(self._sentence_pause_check.get())
-        self._settings["sentence_pause_enabled"] = self._sentence_pause_enabled
-        self._save_settings()
+        if not self._file_batch_active:
+            self._settings["sentence_pause_enabled"] = self._sentence_pause_enabled
+            self._save_settings()
         self._set_sentence_pause_controls_enabled(self._sentence_pause_enabled)
-        self._invalidate_generated()
+        self._on_file_item_control_changed()
 
     def _set_sentence_pause_controls_enabled(self, enabled: bool):
         """Keep dependent duration and punctuation controls in sync with the master switch."""
         state = "normal" if enabled else "disabled"
+        active_text = self._c("text")
+        muted_text = self._c("muted")
+        disabled_text = self._c("disabled_text")
+        active_bg = self._c("field")
+        disabled_bg = self._c("surface_alt")
         if self._pause_entry is not None:
-            self._pause_entry.configure(state=state)
+            self._pause_entry.configure(
+                state=state,
+                fg_color=active_bg if enabled else disabled_bg,
+                border_color=self._c("border"),
+                text_color=active_text if enabled else muted_text,
+            )
+        if self._pause_duration_row is not None:
+            if enabled:
+                self._pause_duration_row.grid()
+            else:
+                self._pause_duration_row.grid_remove()
+        if self._pause_duration_label is not None:
+            self._pause_duration_label.configure(text_color=muted_text if enabled else disabled_text)
+        if self._pause_unit_label is not None:
+            self._pause_unit_label.configure(text_color=muted_text if enabled else disabled_text)
+        if self._sentence_pause_hint is not None:
+            self._sentence_pause_hint.configure(text_color=muted_text if enabled else disabled_text)
+            if enabled:
+                self._sentence_pause_hint.grid()
+            else:
+                self._sentence_pause_hint.grid_remove()
         if self._punctuation_label is not None:
-            self._punctuation_label.configure(text_color=self._c("muted") if enabled else self._c("border"))
+            self._punctuation_label.configure(text_color=muted_text if enabled else disabled_text)
+            if enabled:
+                self._punctuation_label.grid()
+            else:
+                self._punctuation_label.grid_remove()
+        if self._punctuation_frame is not None:
+            self._punctuation_frame.configure(
+                fg_color=active_bg if enabled else disabled_bg,
+                border_color=self._c("border"),
+            )
+            if enabled:
+                self._punctuation_frame.grid()
+            else:
+                self._punctuation_frame.grid_remove()
         for item in self._punctuation_checks.values():
             check = item[2] if len(item) > 2 else item[0]
-            check.configure(state=state)
+            check.configure(
+                state=state,
+                text_color=active_text if enabled else muted_text,
+                fg_color=self._c("primary") if enabled else disabled_text,
+                border_color=self._c("border"),
+                hover_color=self._c("card_raised") if enabled else disabled_bg,
+            )
 
     def _toggle_line_pause(self):
         self._line_pause_enabled = bool(self._line_pause_check.get())
-        self._settings["line_pause_enabled"] = self._line_pause_enabled
-        self._save_settings()
+        if not self._file_batch_active:
+            self._settings["line_pause_enabled"] = self._line_pause_enabled
+            self._save_settings()
         self._set_line_pause_controls_enabled(self._line_pause_enabled)
         self._update_srt_fill_visibility()
-        self._invalidate_generated()
+        self._on_file_item_control_changed()
 
     def _set_line_pause_controls_enabled(self, enabled: bool):
         """Keep the line-end duration field linked to its master switch."""
@@ -2894,9 +4481,10 @@ class App(ctk.CTk):
             if var.get():
                 marks.update(values)
         self._sentence_pause_marks = marks
-        self._settings["sentence_pause_marks"] = sorted(marks)
-        self._save_settings()
-        self._invalidate_generated()
+        if not self._file_batch_active:
+            self._settings["sentence_pause_marks"] = sorted(marks)
+            self._save_settings()
+        self._on_file_item_control_changed()
 
     def _on_pause_changed(self, _event=None):
         try:
@@ -2906,9 +4494,10 @@ class App(ctk.CTk):
             value = self._sentence_pause_ms
         self._sentence_pause_ms = value
         self._pause_var.set(str(value))
-        self._settings["sentence_pause_ms"] = value
-        self._save_settings()
-        self._invalidate_generated()
+        if not self._file_batch_active:
+            self._settings["sentence_pause_ms"] = value
+            self._save_settings()
+        self._on_file_item_control_changed()
 
     def _on_line_pause_changed(self, _event=None):
         try:
@@ -2918,9 +4507,10 @@ class App(ctk.CTk):
             value = self._line_pause_ms
         self._line_pause_ms = value
         self._line_pause_var.set(str(value))
-        self._settings["line_pause_ms"] = value
-        self._save_settings()
-        self._invalidate_generated()
+        if not self._file_batch_active:
+            self._settings["line_pause_ms"] = value
+            self._save_settings()
+        self._on_file_item_control_changed()
 
     def _on_sentence_pause(self):
         """Open the batch action that adds inline pause markers to the editor."""
@@ -3085,6 +4675,535 @@ class App(ctk.CTk):
         except Exception:  # noqa: BLE001
             pass
 
+    def _show_batch_rule_help(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("batch_rule_title"))
+        dialog.geometry("1040x760")
+        dialog.minsize(860, 620)
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(0, weight=1)
+        content = ctk.CTkScrollableFrame(dialog, fg_color=self._c("surface"))
+        content.grid(row=0, column=0, sticky="nsew", padx=14, pady=(14, 8))
+        content.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            content,
+            text=self._t("batch_rule_title"),
+            text_color=self._c("text"),
+            font=self._font(size=21, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            content,
+            text=self._t("batch_rule_desc"),
+            text_color=self._c("muted"),
+            justify="left",
+            wraplength=930,
+        ).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+
+        ctk.CTkLabel(
+            content,
+            text=self._t("batch_rule_syntax_title"),
+            text_color=self._c("accent"),
+            font=self._font(size=14, weight="bold"),
+        ).grid(row=2, column=0, sticky="w", padx=12, pady=(4, 4))
+        syntax = ctk.CTkTextbox(
+            content,
+            height=86,
+            wrap="word",
+            fg_color=self._c("field"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            font=self._font(size=12),
+        )
+        syntax.grid(row=3, column=0, sticky="ew", padx=12)
+        if self._sentence_pause_enabled:
+            syntax_content = (
+                f"{self._t('batch_rule_full_example')}\n"
+                f"{self._t('batch_rule_compact_example')}\n"
+                f"{self._t('batch_rule_fields')}"
+            )
+        else:
+            syntax_content = (
+                f"{self._t('batch_rule_no_pause_example')}\n"
+                f"{self._t('batch_rule_fields_no_pause')}"
+            )
+        syntax.insert("1.0", syntax_content)
+        syntax.configure(state="disabled")
+
+        def bind_trimmed_select_all(widget):
+            def select_all(_event=None):
+                try:
+                    content = widget.get("1.0", "end-1c")
+                    start = len(content) - len(content.lstrip())
+                    end = len(content.rstrip())
+                    widget.tag_remove("sel", "1.0", "end")
+                    widget.tag_add("sel", f"1.0+{start}c", f"1.0+{end}c")
+                    widget.mark_set("insert", f"1.0+{end}c")
+                    widget.see("insert")
+                except Exception:  # noqa: BLE001 - the dialog may already be closed
+                    pass
+                return "break"
+
+            widget.bind("<Control-a>", select_all)
+            widget.bind("<Control-A>", select_all)
+
+        bind_trimmed_select_all(syntax)
+
+        simulate = ctk.CTkFrame(
+            content,
+            fg_color=self._c("surface_alt"),
+            corner_radius=10,
+            border_width=1,
+            border_color=self._c("border"),
+        )
+        simulate.grid(row=4, column=0, sticky="ew", padx=12, pady=(14, 12))
+        simulate.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            simulate,
+            text=f"{self._t('batch_rule_sim_title')} · {self._t('batch_rule_voice_pick')}",
+            text_color=self._c("text"),
+            font=self._font(size=14, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
+        sim_grid = ctk.CTkFrame(simulate, fg_color="transparent")
+        sim_grid.grid(row=1, column=0, sticky="ew", padx=12)
+        for column in range(3):
+            sim_grid.grid_columnconfigure(column, weight=1, uniform="rule_sim")
+
+        fallback_voices = [
+            {
+                "ShortName": DEFAULT_VOICE,
+                "Locale": "en-US",
+                "Gender": GENDER_MALE,
+                "FriendlyName": "Microsoft Andrew Multilingual Online (Natural) - English (United States)",
+            },
+            {
+                "ShortName": "en-US-AnaNeural",
+                "Locale": "en-US",
+                "Gender": GENDER_FEMALE,
+                "FriendlyName": "Microsoft Ana Online (Natural) - English (United States)",
+            },
+            {
+                "ShortName": "da-DK-JeppeNeural",
+                "Locale": "da-DK",
+                "Gender": GENDER_MALE,
+                "FriendlyName": "Microsoft Jeppe Online (Natural) - Danish (Denmark)",
+            },
+            {
+                "ShortName": "en-NG-AbeoNeural",
+                "Locale": "en-NG",
+                "Gender": GENDER_MALE,
+                "FriendlyName": "Microsoft Abeo Online (Natural) - English (Nigeria)",
+            },
+        ]
+        rule_voice_map = self._voice_map or {voice["ShortName"]: voice for voice in fallback_voices}
+        rule_engine = self._groups_engine
+        if rule_engine is None or not rule_engine.languages():
+            rule_engine = VoiceGroupingEngine(fallback_voices)
+            rule_voice_map = {voice["ShortName"]: voice for voice in fallback_voices}
+        rule_langs = rule_engine.languages()
+
+        def rule_display_name(code):
+            if code in self._voice_map:
+                return self._display_name(code)
+            info = rule_voice_map.get(code) or {}
+            stem = code.rsplit("-", 1)[-1].removesuffix("Neural")
+            locale = str(info.get("Locale") or "")
+            gender = self._localized_gender(info.get("Gender") or "")
+            if locale:
+                return f"{stem} · {self._localized_locale(locale)} · {gender}（{code}）"
+            return code
+
+        preferred_code = self._selected_voice_code or DEFAULT_VOICE
+        preferred_info = rule_voice_map.get(preferred_code) or {}
+        preferred_lang = str(preferred_info.get("Locale") or self._selected_lang or "en").split("-", 1)[0].lower()
+        if preferred_lang not in rule_langs:
+            preferred_lang = "en" if "en" in rule_langs else rule_langs[0]
+        preferred_gender = str(preferred_info.get("Gender") or self._selected_gender or GENDER_ALL)
+        if preferred_gender not in (GENDER_FEMALE, GENDER_MALE, GENDER_OTHER):
+            preferred_gender = GENDER_ALL
+
+        sim_lang_map = {self._localized_lang_name(code): code for code in rule_langs}
+        sim_lang_var = tk.StringVar(
+            value=next(label for label, code in sim_lang_map.items() if code == preferred_lang)
+        )
+        sim_gender_map = {}
+        sim_gender_var = tk.StringVar()
+        sim_voice_var = tk.StringVar()
+        sim_code_by_label = {}
+        picker_state = {"lang": preferred_lang, "gender": preferred_gender, "code": preferred_code}
+        pause_var = tk.StringVar(value=str(self._sentence_pause_ms if self._sentence_pause_enabled else 0))
+        marks_var = tk.StringVar(value="".join(sorted(self._sentence_pause_marks)))
+        rate_var = tk.StringVar(value=f"{self._rate_var.get():+d}%")
+        volume_var = tk.StringVar(value=f"{self._volume_var.get():+d}%")
+        pitch_var = tk.StringVar(value=f"{self._pitch_var.get():+d}Hz")
+        srt_var = tk.BooleanVar(value=self._srt_enabled)
+        json_var = tk.BooleanVar(value=self._timeline_enabled)
+
+        ctk.CTkLabel(sim_grid, text=self._t("lang"), text_color=self._c("muted")).grid(row=0, column=0, sticky="w", pady=(0, 3))
+        sim_lang_combo = ctk.CTkComboBox(
+            sim_grid,
+            values=list(sim_lang_map),
+            variable=sim_lang_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        sim_lang_combo.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(sim_grid, text=self._t("gender"), text_color=self._c("muted")).grid(row=0, column=1, sticky="w", pady=(0, 3))
+        sim_gender_combo = ctk.CTkComboBox(
+            sim_grid,
+            values=[],
+            variable=sim_gender_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        sim_gender_combo.grid(row=1, column=1, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(sim_grid, text=self._t("voice"), text_color=self._c("muted")).grid(row=0, column=2, sticky="w", pady=(0, 3))
+        voice_combo = ctk.CTkComboBox(
+            sim_grid,
+            values=[],
+            variable=sim_voice_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        voice_combo.grid(row=1, column=2, sticky="ew")
+        ctk.CTkLabel(sim_grid, text=self._t("pause_label_normal"), text_color=self._c("muted")).grid(row=2, column=0, sticky="w", pady=(8, 3))
+        pause_entry = ctk.CTkEntry(
+            sim_grid,
+            textvariable=pause_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        pause_entry.grid(row=3, column=0, sticky="ew", padx=(0, 8))
+        marks_label = ctk.CTkLabel(sim_grid, text=self._t("pause_punctuation"), text_color=self._c("muted"))
+        marks_label.grid(row=2, column=1, sticky="w", pady=(8, 3))
+        marks_entry = ctk.CTkEntry(
+            sim_grid,
+            textvariable=marks_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        marks_entry.grid(row=3, column=1, sticky="ew", padx=(0, 8))
+
+        ctk.CTkLabel(sim_grid, text=self._t("rate"), text_color=self._c("muted")).grid(row=4, column=0, sticky="w", pady=(8, 3))
+        ctk.CTkEntry(sim_grid, textvariable=rate_var, height=30, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text")).grid(row=5, column=0, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(sim_grid, text=self._t("volume"), text_color=self._c("muted")).grid(row=4, column=1, sticky="w", pady=(8, 3))
+        ctk.CTkEntry(sim_grid, textvariable=volume_var, height=30, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text")).grid(row=5, column=1, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(sim_grid, text=self._t("pitch"), text_color=self._c("muted")).grid(row=4, column=2, sticky="w", pady=(8, 3))
+        ctk.CTkEntry(sim_grid, textvariable=pitch_var, height=30, fg_color=self._c("field"), border_color=self._c("border"), text_color=self._c("text")).grid(row=5, column=2, sticky="ew")
+        ctk.CTkCheckBox(sim_grid, text=self._t("srt_subtitles"), variable=srt_var, text_color=self._c("text"), fg_color=self._c("primary"), border_color=self._c("border")).grid(row=6, column=0, sticky="w", pady=(10, 0))
+        ctk.CTkCheckBox(sim_grid, text=self._t("timeline"), variable=json_var, text_color=self._c("text"), fg_color=self._c("primary"), border_color=self._c("border")).grid(row=6, column=1, sticky="w", pady=(10, 0))
+
+        ctk.CTkLabel(
+            simulate,
+            text=self._t("batch_rule_preview"),
+            text_color=self._c("muted"),
+            font=self._font(size=12, weight="bold"),
+        ).grid(row=2, column=0, sticky="w", padx=12, pady=(12, 3))
+        rule_box = ctk.CTkTextbox(
+            simulate,
+            height=70,
+            wrap="word",
+            fg_color=self._c("field"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("accent"),
+            font=ctk.CTkFont(family="Consolas", size=12),
+        )
+        rule_box.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
+        bind_trimmed_select_all(rule_box)
+        copy_row = ctk.CTkFrame(simulate, fg_color="transparent")
+        copy_row.grid(row=4, column=0, sticky="e", padx=12, pady=(0, 10))
+
+        def selected_code():
+            return sim_code_by_label.get(sim_voice_var.get()) or picker_state["code"] or DEFAULT_VOICE
+
+        def preferred_alias(code):
+            for alias, target in self._voice_alias_index.items():
+                if target == code and alias and "-" not in alias and len(alias) >= 3:
+                    return alias[:1].upper() + alias[1:]
+            return code
+
+        def refresh_rule():
+            try:
+                pause_ms = validate_pause_ms(pause_var.get().strip() or "0")
+                header = build_tts_header(
+                    preferred_alias(selected_code()),
+                    sentence_pause_ms=pause_ms,
+                    sentence_pause_marks=marks_var.get() if pause_ms > 0 else "",
+                    srt_enabled=srt_var.get(),
+                    timeline_enabled=json_var.get(),
+                    rate=rate_var.get(),
+                    volume=volume_var.get(),
+                    pitch=pitch_var.get(),
+                )
+            except ValueError as exc:
+                header = self._t("batch_rule_invalid", error=str(exc))
+                pause_ms = 0
+            if pause_ms > 0:
+                marks_label.grid()
+                marks_entry.grid()
+                marks_entry.configure(state="normal")
+            else:
+                marks_label.grid_remove()
+                marks_entry.grid_remove()
+                marks_entry.configure(state="disabled")
+            rule_box.configure(state="normal")
+            rule_box.delete("1.0", "end")
+            rule_box.insert("1.0", header)
+            rule_box.configure(state="disabled")
+
+        def refresh_rule_voice_options(preferred=None, sync_dictionary=True):
+            lang = sim_lang_map.get(sim_lang_var.get(), picker_state["lang"])
+            picker_state["lang"] = lang
+            genders = rule_engine.genders(lang)
+            gender_opts = [GENDER_ALL] + genders
+            sim_gender_map.clear()
+            sim_gender_map.update({self._gender_label(gender): gender for gender in gender_opts})
+            current_gender = sim_gender_map.get(sim_gender_var.get(), picker_state["gender"])
+            if current_gender not in gender_opts:
+                current_gender = GENDER_ALL
+            picker_state["gender"] = current_gender
+            sim_gender_combo.configure(values=list(sim_gender_map))
+            sim_gender_var.set(next(label for label, gender in sim_gender_map.items() if gender == current_gender))
+
+            voices = rule_engine.voices(
+                lang,
+                None if current_gender == GENDER_ALL else current_gender,
+            )
+            codes = [voice.get("ShortName") for voice in voices if voice.get("ShortName")]
+            target = preferred or picker_state["code"]
+            if target not in codes:
+                target = DEFAULT_VOICE if lang == "en" and DEFAULT_VOICE in codes else (codes[0] if codes else "")
+            picker_state["code"] = target
+            sim_code_by_label.clear()
+            sim_code_by_label.update({rule_display_name(code): code for code in codes})
+            voice_combo.configure(values=list(sim_code_by_label))
+            sim_voice_var.set(rule_display_name(target) if target else "")
+            if sync_dictionary:
+                sync_dict_filters(lang, current_gender)
+
+        def on_sim_lang_changed(_value=None):
+            picker_state["code"] = ""
+            refresh_rule_voice_options(sync_dictionary=True)
+            refresh_rule()
+
+        def on_sim_gender_changed(_value=None):
+            picker_state["code"] = ""
+            refresh_rule_voice_options(sync_dictionary=True)
+            refresh_rule()
+
+        def on_sim_voice_changed(_value=None):
+            code = sim_code_by_label.get(sim_voice_var.get())
+            if not code:
+                return
+            picker_state["code"] = code
+            info = rule_voice_map.get(code) or {}
+            actual_gender = info.get("Gender") or GENDER_ALL
+            if actual_gender in rule_engine.genders(picker_state["lang"]):
+                picker_state["gender"] = actual_gender
+                label = next((key for key, value in sim_gender_map.items() if value == actual_gender), "")
+                if label:
+                    sim_gender_var.set(label)
+            sync_dict_filters(picker_state["lang"], picker_state["gender"])
+            refresh_rule()
+
+        def copy_rule():
+            self.clipboard_clear()
+            self.clipboard_append(rule_box.get("1.0", "end-1c"))
+            self.log(self._t("batch_rule_copied"))
+
+        for widget in (pause_entry, marks_entry):
+            widget.bind("<KeyRelease>", lambda _event: refresh_rule())
+        for variable in (rate_var, volume_var, pitch_var):
+            variable.trace_add("write", lambda *_args: refresh_rule())
+        sim_lang_combo.configure(command=on_sim_lang_changed)
+        sim_gender_combo.configure(command=on_sim_gender_changed)
+        voice_combo.configure(command=on_sim_voice_changed)
+        for check in (srt_var, json_var):
+            check.trace_add("write", lambda *_args: refresh_rule())
+        ctk.CTkButton(
+            copy_row,
+            text=self._t("batch_rule_copy"),
+            width=100,
+            height=30,
+            fg_color=self._c("primary"),
+            hover_color=self._c("primary_hover"),
+            text_color="#FFFFFF",
+            command=copy_rule,
+        ).pack()
+
+        ctk.CTkLabel(
+            content,
+            text=self._t("batch_rule_voice_title"),
+            text_color=self._c("accent"),
+            font=self._font(size=14, weight="bold"),
+        ).grid(row=5, column=0, sticky="w", padx=12, pady=(2, 5))
+        dict_filters = ctk.CTkFrame(content, fg_color="transparent")
+        dict_filters.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 6))
+        dict_filters.grid_columnconfigure(2, weight=1)
+        dict_lang_map = {
+            self._t("batch_rule_all_languages"): "__all_languages__",
+            **{self._localized_lang_name(code): code for code in rule_langs},
+        }
+        dict_gender_map = {
+            self._t("gender_all"): GENDER_ALL,
+            self._t("gender_female"): GENDER_FEMALE,
+            self._t("gender_male"): GENDER_MALE,
+            self._t("gender_other"): GENDER_OTHER,
+        }
+        dict_lang_var = tk.StringVar(
+            value=next(label for label, code in dict_lang_map.items() if code == preferred_lang)
+        )
+        dict_gender_var = tk.StringVar(
+            value=next(label for label, gender in dict_gender_map.items() if gender == preferred_gender)
+        )
+        ctk.CTkLabel(dict_filters, text=self._t("lang"), text_color=self._c("muted")).grid(row=0, column=0, sticky="w", pady=(0, 3))
+        dict_lang_combo = ctk.CTkComboBox(
+            dict_filters,
+            values=list(dict_lang_map),
+            variable=dict_lang_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        dict_lang_combo.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(dict_filters, text=self._t("gender"), text_color=self._c("muted")).grid(row=0, column=1, sticky="w", pady=(0, 3))
+        dict_gender_combo = ctk.CTkComboBox(
+            dict_filters,
+            values=list(dict_gender_map),
+            variable=dict_gender_var,
+            height=30,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        dict_gender_combo.grid(row=1, column=1, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(dict_filters, text=self._t("batch_rule_search"), text_color=self._c("muted")).grid(row=0, column=2, sticky="w", pady=(0, 3))
+        search_var = tk.StringVar(value="")
+        search_entry = ctk.CTkEntry(
+            dict_filters,
+            textvariable=search_var,
+            height=32,
+            placeholder_text=self._t("batch_rule_search"),
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+        )
+        search_entry.grid(row=1, column=2, sticky="ew")
+        dict_count_label = ctk.CTkLabel(
+            dict_filters,
+            text="",
+            text_color=self._c("muted"),
+            anchor="w",
+            font=self._font(size=11),
+        )
+        dict_count_label.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
+        voice_box = ctk.CTkTextbox(
+            content,
+            height=240,
+            wrap="none",
+            fg_color=self._c("field"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            font=ctk.CTkFont(family="Consolas", size=11),
+        )
+        voice_box.grid(row=7, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        def sync_dict_filters(lang, gender):
+            lang_label = next((key for key, value in dict_lang_map.items() if value == lang), "")
+            if lang_label:
+                dict_lang_var.set(lang_label)
+            gender_label = next((key for key, value in dict_gender_map.items() if value == gender), "")
+            if gender_label:
+                dict_gender_var.set(gender_label)
+            refresh_voice_box()
+
+        def refresh_voice_box(_event=None):
+            query = search_var.get().strip().lower()
+            selected_lang = dict_lang_map.get(dict_lang_var.get(), "__all_languages__")
+            selected_gender = dict_gender_map.get(dict_gender_var.get(), GENDER_ALL)
+            alias_index = self._voice_alias_index
+            if not alias_index:
+                alias_index = build_voice_alias_index(
+                    rule_voice_map.values(),
+                    preferred_codes=(
+                        DEFAULT_VOICE,
+                        "en-US-AnaNeural",
+                        "da-DK-JeppeNeural",
+                        "en-NG-AbeoNeural",
+                    ),
+                )
+            rows = []
+            for alias, code in alias_index.items():
+                if "-" in alias and alias == code.lower():
+                    continue
+                info = rule_voice_map.get(code) or self._voice_map.get(code) or {}
+                locale = str(info.get("Locale") or "")
+                lang = locale.split("-", 1)[0].lower()
+                gender = info.get("Gender") or GENDER_OTHER
+                if selected_lang != "__all_languages__" and lang != selected_lang:
+                    continue
+                if selected_gender != GENDER_ALL and gender != selected_gender:
+                    continue
+                name = self._voice_dictionary_name(code)
+                localized_locale = self._localized_locale(locale) if locale else ""
+                localized_gender = self._localized_gender(gender)
+                haystack = " ".join(
+                    (alias, name, code, localized_locale, localized_gender, gender, lang)
+                ).lower()
+                if query and query not in haystack:
+                    continue
+                rows.append((lang, gender, alias, name, code, localized_locale, localized_gender))
+            rows.sort(key=lambda row: (row[0], row[1], row[2].lower()))
+            headers = (
+                self._t("batch_rule_dict_alias"),
+                self._t("batch_rule_dict_name"),
+                self._t("batch_rule_dict_code"),
+                self._t("batch_rule_dict_locale"),
+                self._t("batch_rule_dict_gender"),
+            )
+            lines = [" | ".join(headers), "-" * 96]
+            lines.extend(" | ".join(row[2:]) for row in rows)
+            if not rows:
+                lines.append(self._t("batch_rule_no_match"))
+            dict_count_label.configure(text=self._t("batch_rule_dict_count", count=len(rows)))
+            voice_box.configure(state="normal")
+            voice_box.delete("1.0", "end")
+            voice_box.insert("1.0", "\n".join(lines))
+            voice_box.configure(state="disabled")
+
+        search_var.trace_add("write", refresh_voice_box)
+        dict_lang_combo.configure(command=lambda _value: refresh_voice_box())
+        dict_gender_combo.configure(command=lambda _value: refresh_voice_box())
+        refresh_rule_voice_options(preferred=preferred_code, sync_dictionary=True)
+        refresh_rule()
+
+        ctk.CTkButton(
+            dialog,
+            text=self._t("batch_rule_close"),
+            width=100,
+            height=34,
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            command=dialog.destroy,
+        ).grid(row=1, column=0, sticky="e", padx=18, pady=(0, 14))
+
     def _show_timeline_help(self):
         is_english = self._language == "en"
         dialog = ctk.CTkToplevel(self)
@@ -3233,6 +5352,17 @@ class App(ctk.CTk):
             (r"^\[提示\] 已启用不再提醒，正在自动重试。$", r"[Info] Reminders suppressed; retrying automatically."),
             (r"^\[分页\] 等待 ([\d.]+) 秒后重试失败项（共 (\d+) 页）…$", r"[Pages] Retrying failed pages in \1 s (\2 page(s))…"),
             (r"^\[逐行\] 等待 ([\d.]+) 秒后重试失败项（共 (\d+) 行）…$", r"[Lines] Retrying failed lines in \1 s (\2 line(s))…"),
+            (r"^\[批量\] 开始生成 (\d+) 个文件。$", r"[Batch] Starting \1 file(s)."),
+            (r"^\[批量\] (.+) 完成（(.+) KB）。$", r"[Batch] \1 done (\2 KB)."),
+            (r"^\[批量\] (.+) 生成失败：(.*)$", r"[Batch] \1 failed: \2"),
+            (r"^\[批量\] (.+) 无可用文字，已跳过。$", r"[Batch] \1 has no readable text; skipped."),
+            (r"^\[批量\] 等待 ([\d.]+) 秒后重试失败文件（共 (\d+) 个）…$", r"[Batch] Retrying failed files in \1 s (\2 file(s))…"),
+            (r"^\[批量\] 已停止（完成 (\d+)/(\d+) 个文件）。$", r"[Batch] Stopped (\1/\2 file(s) done)."),
+            (r"^\[批量\] 完成 (\d+)/(\d+) 个文件，可打包下载或右键单独下载。$", r"[Batch] Complete: \1/\2 file(s). Download the ZIP or right-click a completed row."),
+            (r"^\[批量\] 未生成任何文件。$", r"[Batch] No files were generated."),
+            (r"^\[保存\] 批量文件压缩包已保存：(.*)$", r"[Save] File-batch ZIP saved: \1"),
+            (r"^\[保存\] 单文件配音压缩包已保存：(.*)$", r"[Save] Single-file ZIP saved: \1"),
+            (r"^\[结果\] 第 (\d+) 个文件已重新生成。$", r"[Result] File \1 regenerated."),
             (r"^等待 ([\d.]+) 秒后重试…$", r"Retrying in \1 seconds…"),
             (r"^已达最大重试次数（(\d+)），任务失败。$", r"Reached the retry limit (\1); giving up."),
             (r"^\[警告\] 生成失败：(.*)（微软语音服务拒绝了连接（403）。(.*)）$", r"[Warning] Synthesis failed: \1 (Microsoft speech service rejected the connection with HTTP 403. \2)"),
@@ -3343,6 +5473,20 @@ class App(ctk.CTk):
         self._log.configure(state="disabled")
 
     def _sync_generated_status(self):
+        if self._file_batch_active:
+            item = self._selected_file_item()
+            if item and item.status == "done":
+                self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
+                self._progress.set(1.0)
+            elif item and item.status == "generating":
+                self._status_label.configure(
+                    text=self._file_item_status_text(item),
+                    text_color="#e0af68",
+                )
+            else:
+                self._status_label.configure(text=self._t("ready"), text_color=self._c("success"))
+                self._progress.set(0)
+            return
         if self._current_page_generated() is not None:
             self._status_label.configure(text=self._t("generated_ok"), text_color="#9ece6a")
             self._progress.set(1.0)
@@ -3356,9 +5500,16 @@ class App(ctk.CTk):
     def _update_generated_buttons(self):
         # 试听/保存始终可见可用：尚未生成时点击会提示“请先生成”，避免按钮被误认为缺失
         state = "disabled" if self._busy else "normal"
-        self._btn_play.configure(state=state)
-        self._btn_save.configure(state=state)
-        has_result = bool(self._generated_pages or (self._generated_path and os.path.exists(self._generated_path)))
+        has_batch_result = any(item.status == "done" for item in self._file_items)
+        self._btn_play.configure(
+            state=state if not self._file_batch_active or (self._selected_file_item() and self._selected_file_item().status == "done") else "disabled"
+        )
+        self._btn_save.configure(state=state if not self._file_batch_active or has_batch_result else "disabled")
+        has_result = bool(
+            has_batch_result
+            or self._generated_pages
+            or (self._generated_path and os.path.exists(self._generated_path))
+        )
         if self._btn_result_preview is not None:
             self._btn_result_preview.configure(state=state if has_result else "disabled")
 
@@ -3384,6 +5535,11 @@ class App(ctk.CTk):
             self._btn_dub_pages.configure(state="disabled" if busy else ("normal" if self._pages else "disabled"))
         if self._btn_prepare_lines is not None:
             self._btn_prepare_lines.configure(state="disabled" if busy else "normal")
+        for button in (self._btn_batch_upload, self._btn_batch_help, self._btn_batch_add, self._btn_batch_remove, self._btn_batch_edit, self._btn_batch_exit):
+            if button is not None:
+                button.configure(state="disabled" if busy else "normal")
+        if self._batch_tree is not None:
+            self._batch_tree.configure(selectmode="none" if busy else "extended")
         self._update_page_bar()
         self._update_generated_buttons()
 
@@ -3392,6 +5548,7 @@ class App(ctk.CTk):
         self._cancel_event.set()
         self._stop_playback()
         self._cleanup_batch()
+        self._cleanup_file_batch()
         try:
             if os.path.exists(self._preview_path):
                 os.unlink(self._preview_path)
