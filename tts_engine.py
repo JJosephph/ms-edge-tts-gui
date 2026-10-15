@@ -12,6 +12,7 @@
 import asyncio
 import os
 import queue
+import random
 import re
 import threading
 import time
@@ -38,6 +39,9 @@ STALL_AUTO_RETRIES = 2        # 卡住后先静默自动重试几次，之后才
 MAX_RETRIES = 4               # 最大生成重试次数
 RETRY_BASE_DELAY = 3.0        # 首次自动重试前等待（秒）
 RETRY_MAX_DELAY = 15.0        # 自动重试等待上限（秒）
+RATE_LIMIT_RETRY_BASE_DELAY = 8.0   # 命中 429 限流时的首次等待（秒）
+RATE_LIMIT_RETRY_MAX_DELAY = 30.0   # 命中 429 限流时的等待上限（秒）
+RETRY_JITTER_RATIO = 0.25     # 退避随机抖动比例，避免多个客户端同时重试
 PROGRESS_REPORT_INTERVAL = 0.25
 DEFAULT_DIRECTIVE_PAUSE_MS = 300
 MIN_PAUSE_MS = 50
@@ -45,6 +49,14 @@ MAX_PAUSE_MS = 10000
 MAX_DIRECTIVE_PAUSE_MS = MAX_PAUSE_MS
 POSTPROCESS_SAMPLE_RATE = 24000
 MP3_FRAME_MS = 48
+
+# 单次合成请求的最大 UTF-8 字节数。edge-tts 内部以 4096 字节切分，但它自带的
+# 切分逻辑在“既没有空格也没有换行”的中文文本上会整体不切分，导致一次请求远超
+# 上限（实测 24KB 中文只发一条请求）。这里由客户端主动切分，保证每次请求都有界。
+SYNTH_SEGMENT_MAX_BYTES = 3600
+# 服务端返回的音频固定为 24kHz/48kbps CBR，字节与时间片(100ns)可精确换算。
+EDGE_TICKS_PER_SECOND = 10_000_000
+EDGE_MP3_BITRATE_BPS = 48_000
 
 NEW_EDGE_TTS_WSS_URL = (
     "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
@@ -54,6 +66,10 @@ SERVICE_REJECTION_MESSAGE = (
     "微软语音服务拒绝了连接（403）。这通常是服务端端点或访问策略变化导致的，"
     "不是本地网络问题。请稍后重试；如果持续出现，请更新到最新版本。"
 )
+RATE_LIMIT_HINT = "微软语音服务临时限流（429），不是本地网络或代理问题"
+SERVER_BUSY_HINT = "微软语音服务暂时不可用（服务端错误），不是本地网络或代理问题"
+
+_HTTP_STATUS_PATTERN = re.compile(r"(?<!\d)([1-5]\d{2})(?!\d)")
 
 
 def configure_edge_tts_endpoint() -> None:
@@ -284,6 +300,91 @@ def seconds_from_edge_ticks(value: object) -> float:
         return max(0.0, float(value) / 10000000.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def http_status_from_exception(exc: BaseException) -> Optional[int]:
+    """从异常链里取出 HTTP 状态码（403 / 429 / 5xx）。
+
+    edge-tts 会抛出 aiohttp 的 WSServerHandshakeError（自带 status），
+    也会把状态码只写进消息文本，因此这里同时检查属性与消息。
+    """
+    seen: set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status = getattr(current, "status", None)
+        if isinstance(status, int) and 100 <= status < 600:
+            return status
+        response = getattr(current, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if isinstance(status_code, int) and 100 <= status_code < 600:
+            return status_code
+        text = str(current).lower()
+        type_name = type(current).__name__.lower()
+        looks_like_handshake = (
+            "invalid response status" in text
+            or "forbidden" in text
+            or "wsserverhandshake" in type_name
+        )
+        if looks_like_handshake:
+            match = _HTTP_STATUS_PATTERN.search(text)
+            if match:
+                return int(match.group(1))
+        current = current.__cause__ or current.__context__
+    return None
+
+
+# 断句优先级：先换行/句末，再逗号类，再空格，最后按字节硬切。
+_HARD_BREAK_CHARS = "\n。！？!?；;…"
+_SOFT_BREAK_CHARS = "，、,：:）)】」》"
+_SPACE_BREAK_CHARS = " \t\u3000"
+
+
+def _char_index_for_bytes(text: str, max_bytes: int) -> int:
+    """返回使 UTF-8 字节数不超过 max_bytes 的最大字符下标（至少 1）。"""
+    total = 0
+    for index, char in enumerate(text):
+        total += len(char.encode("utf-8"))
+        if total > max_bytes:
+            return max(1, index)
+    return len(text)
+
+
+def _find_segment_cut(text: str, max_bytes: int) -> int:
+    """在 max_bytes 范围内挑一个尽量自然的切分点（返回字符下标）。"""
+    hard_limit = _char_index_for_bytes(text, max_bytes)
+    if hard_limit >= len(text):
+        return len(text)
+    window = text[:hard_limit]
+    for marks in (_HARD_BREAK_CHARS, _SOFT_BREAK_CHARS, _SPACE_BREAK_CHARS):
+        for index in range(len(window) - 1, 0, -1):
+            if window[index] in marks:
+                return index + 1
+    return hard_limit
+
+
+def split_text_for_synthesis(
+    text: str, max_bytes: int = SYNTH_SEGMENT_MAX_BYTES
+) -> list:
+    """把待合成文本切成若干不超过 max_bytes 的片段。
+
+    返回片段按顺序拼接后与原文完全一致（不丢字符），因此后续基于原文的
+    WordBoundary / SentenceBoundary 对齐逻辑不受影响。
+    """
+    if not text:
+        return []
+    if len(text.encode("utf-8")) <= max_bytes:
+        return [text]
+    segments = []
+    remaining = text
+    while remaining:
+        if len(remaining.encode("utf-8")) <= max_bytes:
+            segments.append(remaining)
+            break
+        cut = _find_segment_cut(remaining, max_bytes)
+        segments.append(remaining[:cut])
+        remaining = remaining[cut:]
+    return segments
 
 
 def audio_duration_seconds(audio_path: str) -> float:
@@ -881,6 +982,7 @@ class TTSEngine:
         self.word_boundaries: list = []
         self.timeline: Optional[dict] = None
         self.error_message = ""
+        self._last_error_status: Optional[int] = None
         self._suppress_stall_prompts = False
         self._auto_stall_retries = 0
 
@@ -895,8 +997,10 @@ class TTSEngine:
     async def _generate_async(self, text: str, output_path, cfg: TTSConfig) -> dict:
         attempts = 0
         self._auto_stall_retries = 0
+        self._last_error_status: Optional[int] = None
         while True:
             attempts += 1
+            self._last_error_status = None
             self.on_log(f"开始第 {attempts} 次生成（语音：{cfg.voice}）")
             outcome = await self._stream_once(text, output_path, cfg)
             if outcome == "done":
@@ -909,21 +1013,73 @@ class TTSEngine:
                 return {
                     "status": "error",
                     "error": self.error_message or "音频后处理失败。",
+                    "http_status": self._last_error_status,
                 }
             # retry
             if attempts >= MAX_RETRIES:
-                self.on_log("已达最大重试次数，任务失败。")
+                message = self._final_failure_message(self._last_error_status)
+                self.on_log(f"已达最大重试次数（{attempts}），任务失败。")
                 return {
                     "status": "error",
-                    "error": "生成多次失败，请检查网络连接或代理设置后重试。",
+                    "error": message,
+                    "http_status": self._last_error_status,
                 }
-            delay = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * (2 ** (attempts - 1)))
+            delay = self._retry_delay(attempts, self._last_error_status)
             self.on_log(f"等待 {delay:g} 秒后重试…")
             try:
                 await self._wait_with_cancel(delay)
             except UserCanceled:
                 self.on_log("任务已取消。")
                 return {"status": "canceled"}
+
+    async def _iter_synthesis_chunks(
+        self, spoken_text: str, cfg: TTSConfig, needs_word_boundary: bool
+    ):
+        """按有界片段合成，并把各片段的边界时间轴补偿为全局时间轴。
+
+        edge-tts 每次请求都会新建一条 WebSocket；片段之间保持顺序，后一片段
+        的边界偏移要加上前面所有片段已产生的音频时长。服务端音频是
+        24kHz/48kbps CBR，因此字节到时间片(100ns)可以精确换算，与 edge-tts
+        内部的 offset 补偿公式一致。
+        """
+        segments = split_text_for_synthesis(spoken_text)
+        if not segments:
+            raise RuntimeError("停顿指令之外没有可朗读的文字。")
+        cumulative_audio_bytes = 0
+        for segment in segments:
+            compensation = (
+                cumulative_audio_bytes
+                * 8
+                * EDGE_TICKS_PER_SECOND
+                // EDGE_MP3_BITRATE_BPS
+            )
+            communicate = edge_tts.Communicate(
+                text=segment,
+                voice=cfg.voice,
+                rate=cfg.rate,
+                volume=cfg.volume,
+                pitch=cfg.pitch,
+                boundary=(
+                    "WordBoundary" if needs_word_boundary else "SentenceBoundary"
+                ),
+                proxy=self.proxy,
+                connect_timeout=CONNECT_TIMEOUT,
+                receive_timeout=RECEIVE_TIMEOUT,
+            )
+            async for chunk in communicate.stream():
+                chunk_type = chunk.get("type")
+                if chunk_type == "audio":
+                    cumulative_audio_bytes += len(chunk.get("data", b""))
+                    yield chunk
+                elif chunk_type in ("SentenceBoundary", "WordBoundary"):
+                    if compensation:
+                        chunk = dict(chunk)
+                        chunk["offset"] = (
+                            int(chunk.get("offset", 0)) + compensation
+                        )
+                    yield chunk
+                else:
+                    yield chunk
 
     async def _stream_once(self, text: str, output_path, cfg: TTSConfig) -> str:
         """执行一次流式生成，返回 'done' | 'cancel' | 'retry'。"""
@@ -962,18 +1118,6 @@ class TTSEngine:
             or bool(pause_overrides)
         )
 
-        communicate = edge_tts.Communicate(
-            text=spoken_text,
-            voice=cfg.voice,
-            rate=cfg.rate,
-            volume=cfg.volume,
-            pitch=cfg.pitch,
-            boundary="WordBoundary" if needs_word_boundary else "SentenceBoundary",
-            proxy=self.proxy,
-            connect_timeout=CONNECT_TIMEOUT,
-            receive_timeout=RECEIVE_TIMEOUT,
-        )
-
         last_report = time.perf_counter()
         written = 0
         total_units = estimate_spoken_units(spoken_text)
@@ -981,7 +1125,7 @@ class TTSEngine:
         percent = 0
         self.on_progress(percent, written)
         try:
-            iterator = communicate.stream()
+            iterator = self._iter_synthesis_chunks(spoken_text, cfg, needs_word_boundary)
             next_chunk = None
             wait_deadline = None
             silent_waiting = False
@@ -1015,7 +1159,11 @@ class TTSEngine:
                             chunk = next_chunk.result()
                         except StopAsyncIteration:
                             break
+                        except UserCanceled:
+                            # 分段/等待期间用户点了取消，按取消处理，不当作失败重试。
+                            raise
                         except Exception as exc:
+                            self._last_error_status = http_status_from_exception(exc)
                             if self._is_service_rejection(exc):
                                 self.error_message = SERVICE_REJECTION_MESSAGE
                                 self.on_log(
@@ -1040,7 +1188,7 @@ class TTSEngine:
                                 )
                                 decision = await self._ask_stall(
                                     "生成等待期间连接中断。"
-                                    "可能是网络不通或代理设置不正确。要重试吗？"
+                                    "可能是网络波动，也可能是服务端临时限流。要重试吗？"
                                 )
                                 if decision == "cancel":
                                     return "cancel"
@@ -1066,7 +1214,7 @@ class TTSEngine:
                             return "retry"
                         decision = await self._ask_stall(
                             "生成似乎卡住了：自动重试后仍长时间没有收到新的音频数据。"
-                            "可能是网络不通或代理设置不正确。要重试吗？"
+                            "可能是网络波动，也可能是服务端临时限流。要重试吗？"
                         )
                         if decision == "cancel":
                             next_chunk.cancel()
@@ -1176,6 +1324,7 @@ class TTSEngine:
             return "error"
         except Exception as exc:  # noqa: BLE001 - 统一兜底并让用户决定
             self._safe_unlink(temp_path)
+            self._last_error_status = http_status_from_exception(exc)
             if self._is_service_rejection(exc):
                 self.error_message = SERVICE_REJECTION_MESSAGE
                 self.on_log(
@@ -1185,6 +1334,10 @@ class TTSEngine:
                 return "error"
             hint = self._classify_error(exc)
             self.on_log(f"[警告] 生成失败：{exc}（{hint}）")
+            if self._is_transient_status(self._last_error_status):
+                # 限流 / 服务端临时故障属于“等一会儿再来”，静默重试比弹窗更合适。
+                self.on_log(f"[提示] {hint}，正在自动重试…")
+                return "retry"
             if self._suppress_stall_prompts:
                 self.on_log("[提示] 已启用不再提醒，正在自动重试。")
                 return "retry"
@@ -1234,8 +1387,15 @@ class TTSEngine:
             await asyncio.sleep(min(0.25, remaining))
 
     def _classify_error(self, exc: Exception) -> str:
-        if self._is_service_rejection(exc):
+        status = http_status_from_exception(exc)
+        if status == 403:
             return SERVICE_REJECTION_MESSAGE
+        if status == 429:
+            return RATE_LIMIT_HINT
+        if status is not None and 500 <= status < 600:
+            return SERVER_BUSY_HINT
+        if status is not None and 400 <= status < 500:
+            return f"微软语音服务拒绝了本次请求（HTTP {status}）"
         text = str(exc).lower()
         network_kw = (
             "timeout",
@@ -1257,21 +1417,44 @@ class TTSEngine:
 
     def _is_service_rejection(self, exc: Exception) -> bool:
         """Recognize an HTTP 403 even when edge-tts wraps it in another error."""
-        seen: set[int] = set()
-        current: Optional[BaseException] = exc
-        while current is not None and id(current) not in seen:
-            seen.add(id(current))
-            if getattr(current, "status", None) == 403:
-                return True
-            text = str(current).lower()
-            if "403" in text and (
-                "invalid response status" in text
-                or "forbidden" in text
-                or "wsserverhandshake" in type(current).__name__.lower()
-            ):
-                return True
-            current = current.__cause__
-        return False
+        return http_status_from_exception(exc) == 403
+
+    @staticmethod
+    def _is_transient_status(status: Optional[int]) -> bool:
+        """限流与服务端临时故障：重试即可，不该弹窗让用户判断。"""
+        if status == 429:
+            return True
+        return status is not None and 500 <= status < 600
+
+    def _retry_delay(self, attempt: int, status: Optional[int]) -> float:
+        """按失败原因计算退避时间；429 限流等待更久，并带随机抖动。"""
+        if status == 429:
+            base = RATE_LIMIT_RETRY_BASE_DELAY
+            cap = RATE_LIMIT_RETRY_MAX_DELAY
+        else:
+            base = RETRY_BASE_DELAY
+            cap = RETRY_MAX_DELAY
+        delay = min(cap, base * (2 ** (attempt - 1)))
+        return delay + random.uniform(0.0, delay * RETRY_JITTER_RATIO)
+
+    @staticmethod
+    def _final_failure_message(status: Optional[int]) -> str:
+        if status == 429:
+            return (
+                "连续多次请求都被微软语音服务限流（429）。"
+                "这是服务端对当前出口 IP 的临时限制，不是本地网络或代理问题。"
+                "请等待 1-2 分钟后重试；批量生成时可以分几次、减少单次数量。"
+            )
+        if status is not None and 500 <= status < 600:
+            return (
+                "微软语音服务连续返回服务端错误。"
+                "这不是本地网络或代理问题，请稍后重试。"
+            )
+        if status == 403:
+            return SERVICE_REJECTION_MESSAGE
+        if status is not None:
+            return f"生成多次失败（服务端返回 HTTP {status}），请稍后重试。"
+        return "生成多次失败，请检查网络连接或代理设置后重试。"
 
     @staticmethod
     def _temp_path(output_path) -> str:

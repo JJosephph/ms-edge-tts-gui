@@ -55,7 +55,7 @@ from voice_groups import (
 from page_import import Page, import_file, import_lines, split_text_into_lines
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.6.2"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -86,6 +86,7 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 PREVIEW_FILENAME = "edge_tts_preview.mp3"
 BATCH_ITEM_DELAY = 1.5        # 批量配音每项之间的间隔，避免连续请求被服务端限流
 BATCH_RETRY_COOLDOWN = 8.0    # 一轮失败后整体重试前的冷却时间
+BATCH_RATE_LIMIT_COOLDOWN = 20.0  # 命中 429 限流后重试失败项前的更长冷却时间
 
 THEMES = {
     "dark": {
@@ -2073,10 +2074,11 @@ class App(ctk.CTk):
                 time.sleep(min(0.25, remaining))
 
         failed: list[tuple[int, Page]] = []
+        rate_limited = False
 
         def generate_item(pos, page) -> bool:
             """生成单项；返回 False 表示失败（取消时同时设置 canceled）。"""
-            nonlocal canceled
+            nonlocal canceled, rate_limited
             if self._cancel_event.is_set():
                 canceled = True
                 return False
@@ -2099,6 +2101,8 @@ class App(ctk.CTk):
                 canceled = True
                 return False
             if result.get("status") != "done":
+                if result.get("http_status") == 429:
+                    rate_limited = True
                 self._ui_q.put((
                     "log",
                     f"[{log_tag}] 第 {pos}/{total} {unit}生成失败：{result.get('error', '未知错误')}",
@@ -2127,12 +2131,13 @@ class App(ctk.CTk):
                 canceled = True
                 break
         if failed and not canceled:
+            cooldown = BATCH_RATE_LIMIT_COOLDOWN if rate_limited else BATCH_RETRY_COOLDOWN
             self._ui_q.put((
                 "log",
-                f"[{log_tag}] 等待 {BATCH_RETRY_COOLDOWN:g} 秒后重试失败项"
+                f"[{log_tag}] 等待 {cooldown:g} 秒后重试失败项"
                 f"（共 {len(failed)} {unit}）…",
             ))
-            if pace(BATCH_RETRY_COOLDOWN):
+            if pace(cooldown):
                 for pos, page in failed:
                     if not generate_item(pos, page) and canceled:
                         break
@@ -3229,7 +3234,12 @@ class App(ctk.CTk):
             (r"^\[分页\] 等待 ([\d.]+) 秒后重试失败项（共 (\d+) 页）…$", r"[Pages] Retrying failed pages in \1 s (\2 page(s))…"),
             (r"^\[逐行\] 等待 ([\d.]+) 秒后重试失败项（共 (\d+) 行）…$", r"[Lines] Retrying failed lines in \1 s (\2 line(s))…"),
             (r"^等待 ([\d.]+) 秒后重试…$", r"Retrying in \1 seconds…"),
+            (r"^已达最大重试次数（(\d+)），任务失败。$", r"Reached the retry limit (\1); giving up."),
             (r"^\[警告\] 生成失败：(.*)（微软语音服务拒绝了连接（403）。(.*)）$", r"[Warning] Synthesis failed: \1 (Microsoft speech service rejected the connection with HTTP 403. \2)"),
+            (r"^\[警告\] 生成失败：(.*)（微软语音服务临时限流（429），不是本地网络或代理问题）$", r"[Warning] Synthesis failed: \1 (Microsoft speech service rate-limited the request with HTTP 429; not a local network or proxy problem)"),
+            (r"^\[警告\] 生成失败：(.*)（微软语音服务暂时不可用（服务端错误），不是本地网络或代理问题）$", r"[Warning] Synthesis failed: \1 (Microsoft speech service is temporarily unavailable; not a local network or proxy problem)"),
+            (r"^\[提示\] 微软语音服务临时限流（429），不是本地网络或代理问题，正在自动重试…$", r"[Info] Microsoft speech service rate-limited the request (HTTP 429); retrying automatically…"),
+            (r"^\[提示\] 微软语音服务暂时不可用（服务端错误），不是本地网络或代理问题，正在自动重试…$", r"[Info] Microsoft speech service is temporarily unavailable; retrying automatically…"),
         ]
         for pattern, replacement in substitutions:
             localized = re.sub(pattern, replacement, message)
