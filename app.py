@@ -69,13 +69,12 @@ from page_import import (
 )
 
 APP_NAME = "樺英雄语音合成助手"
-APP_VERSION = "1.7.0"
+APP_VERSION = os.environ.get("APP_VERSION", "1.7.0").lstrip("v") or "1.7.0"
 DEVELOPER = "HuaYingXiong"
 DEVELOPER_QQ = "562297979"
 REPOSITORY_URL = "https://github.com/sjhznh/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/sjhznh/ms-edge-tts-gui"
 UI_FONT_FAMILY = "Microsoft YaHei UI"
-
 
 def normalize_saved_pause(value: object, default: int = 0) -> int:
     """Migrate old settings to the supported exact-pause range."""
