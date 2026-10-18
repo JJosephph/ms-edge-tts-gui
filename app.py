@@ -471,7 +471,7 @@ class App(ctk.CTk):
         "no_audio": {"zh": "请先点击“生成音频”生成一段音频。", "en": "Please click “Generate Audio” first."},
         "stop": {"zh": "停止", "en": "Stop"},
         "log": {"zh": "活动日志", "en": "Activity log"},
-        "footer": {"zh": "免费开源软件 · MIT License · Powered by Microsoft Edge TTS", "en": "Free open-source software · MIT License · Powered by Microsoft Edge TTS"},
+        "footer": {"zh": "樺英雄独家制作 · MIT License · Powered by Microsoft Edge TTS", "en": "Free open-source software · MIT License · Powered by Microsoft Edge TTS"},
         "repository": {"zh": "仓库：", "en": "Repo: "},
         "empty": {"zh": "请输入文章内容。", "en": "Please enter some article text."},
         "import_file": {"zh": "导入文件", "en": "Import File"},
