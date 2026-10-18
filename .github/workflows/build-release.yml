@@ -48,13 +48,17 @@ jobs:
       - name: 安装 Inno Setup
         run: choco install innosetup -y --no-progress
 
-      - name: 编译安装程序（封装单文件）
+      - name: 编译安装程序（封装单文件，自动去 v 前缀）
         shell: pwsh
         run: |
           Set-Location $env:GITHUB_WORKSPACE
           $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { Write-Error "ISCC not found"; exit 1 }
-          & $iscc "/DMyAppVersion=$env:APP_VERSION" "installer\HuayingxiongTTS.iss"
+
+          # ★ 关键：去掉 v 前缀，Inno VersionInfoVersion 只接受纯数字
+          $cleanVer = $env:APP_VERSION -replace '^v', ''
+
+          & $iscc "/DMyAppVersion=$cleanVer" "installer\HuayingxiongTTS.iss"
 
       - name: 生成 Release 说明
         shell: pwsh
