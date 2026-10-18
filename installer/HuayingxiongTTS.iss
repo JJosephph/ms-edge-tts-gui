@@ -1,13 +1,13 @@
 ; ============================================================
 ; 樺英雄语音合成助手 - Inno Setup 安装脚本
-; 策略：直接打包 PyInstaller 单文件版（Portable），避免 _internal / python311.dll 问题
+; 版本号：CI 通过 /DMyAppVersion 传入，本地兜底 1.0.0
 ; ============================================================
 
 #define MyAppName "樺英雄语音合成助手"
 
-; 版本号：优先用 CI 传入的（已去 v 前缀），否则用兜底值
+; ★ 关键：未从命令行传入时才用兜底值，CI 的 /D 参数会覆盖这里
 #ifndef MyAppVersion
-#define MyAppVersion "1.7.17"
+  #define MyAppVersion "1.0.0"
 #endif
 
 #define MyAppPublisher "HuaYingXiong"
