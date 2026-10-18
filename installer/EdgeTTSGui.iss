@@ -1,15 +1,15 @@
 ﻿; ============================================================
-; Edge TTS 语音合成助手 - Inno Setup 安装脚本
+; 樺英雄语音合成助手 - Inno Setup 安装脚本
 ; 使用前请先运行 build_release.bat 生成 dist\EdgeTTSGui\
-; 免费开源（MIT License）· 开发者 WangYufan · 支持卸载
+; 免费开源（MIT License）· 开发者 HuaYingXiong · 支持卸载
 ; ============================================================
 
-#define MyAppName "Edge TTS 语音合成助手"
+#define MyAppName "樺英雄语音合成助手"
 #ifndef MyAppVersion
 #define MyAppVersion "1.7.0"
 #endif
-#define MyAppPublisher "WangYufan"
-#define MyAppExeName "EdgeTTSGui.exe"
+#define MyAppPublisher "HuaYingXiong"
+#define MyAppExeName "樺英雄语音合成助手.exe"
 #define MyAppURL "https://github.com/JJosephph/ms-edge-tts-gui"
 
 [Setup]
@@ -22,7 +22,7 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppComments=Free open-source software (MIT License) / 免费开源软件（MIT License）
-AppCopyright=Copyright (c) 2026 WangYufan (QQ 1471056247)
+AppCopyright=Copyright (c) 2026 樺英雄语音合成助手 (QQ 562297979)
 DefaultDirName={autopf}\EdgeTTSGui
 DisableProgramGroupPage=yes
 OutputDir=..\dist
@@ -79,7 +79,7 @@ begin
     if IsZh then
     begin
       WizardForm.WelcomeLabel1.Caption := '欢迎安装 {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：WangYufan（QQ 1471056247）。' + #13#10 + #13#10 +
+      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：HuaYingXiong（QQ 562297979）。' + #13#10 + #13#10 +
         '已内置 Python 运行环境，无需额外安装，装完即可使用。' + #13#10 + #13#10 +
         '仓库地址：https://github.com/JJosephph/ms-edge-tts-gui' + #13#10 +
         '点击“下一步”选择安装位置（任意磁盘或文件夹），然后开始安装。';
@@ -87,7 +87,7 @@ begin
     else
     begin
       WizardForm.WelcomeLabel1.Caption := 'Welcome to {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (MIT License) by WangYufan (QQ 1471056247).' + #13#10 + #13#10 +
+      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (MIT License) by HuaYingXiong (QQ 562297979).' + #13#10 + #13#10 +
         'No Python required - the runtime is bundled. Install & use right away.' + #13#10 + #13#10 +
         'Repository: https://github.com/JJosephph/ms-edge-tts-gui' + #13#10 +
         'Click Next to choose an install location (any drive), then install.';
