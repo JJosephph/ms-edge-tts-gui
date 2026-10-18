@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Edge TTS 语音合成助手 —— 现代化桌面 GUI 客户端。
+"""樺英雄语音合成助手 —— 现代化桌面 GUI 客户端。
 
 功能：
 - 粘贴文章一键生成音频：生成一次，之后可随时试听或保存下载（无需重复合成）
@@ -68,12 +68,12 @@ from page_import import (
     split_text_into_lines,
 )
 
-APP_NAME = "Edge TTS 语音合成助手"
+APP_NAME = "樺英雄语音合成助手"
 APP_VERSION = "1.7.0"
-DEVELOPER = "WangYufan"
-DEVELOPER_QQ = "1471056247"
-REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
-REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
+DEVELOPER = "HuaYingXiong"
+DEVELOPER_QQ = "562297979"
+REPOSITORY_URL = "https://github.com/sjhznh/ms-edge-tts-gui"
+REPOSITORY_DISPLAY = "github.com/sjhznh/ms-edge-tts-gui"
 UI_FONT_FAMILY = "Microsoft YaHei UI"
 
 
@@ -327,7 +327,7 @@ class App(ctk.CTk):
     # ============================================================ UI 构建
 
     TRANSLATIONS = {
-        "app": {"zh": "Edge TTS 语音合成助手", "en": "Edge TTS Voice Studio"},
+        "app": {"zh": "樺英雄语音合成助手", "en": "Edge TTS Voice Studio"},
         "open": {"zh": "开源 · MIT License", "en": "Open Source · MIT License"},
         "open_badge": {"zh": "免费 · 开源", "en": "Free · Open Source"},
         "github_repo": {"zh": "GitHub 仓库", "en": "GitHub"},
