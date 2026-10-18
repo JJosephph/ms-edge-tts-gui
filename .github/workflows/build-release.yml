@@ -33,11 +33,13 @@ jobs:
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
           sed -i "s/APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" app.py
 
-      - name: PyInstaller 打包（目录版，供安装器使用）
-        run: pyinstaller --noconfirm --clean --onedir --windowed --name HuayingxiongTTS --icon assets/app.ico --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+      - name: PyInstaller 打包（目录版 → dist/HuayingxiongTTS/HuayingxiongTTS.exe）
+        run: |
+          pyinstaller --noconfirm --clean --onedir --windowed --name HuayingxiongTTS --icon assets/app.ico --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 
       - name: PyInstaller 打包（便携单文件版）
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name HuayingxiongTTS-Portable --icon assets/app.ico --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name HuayingxiongTTS-Portable --icon assets/app.ico --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 
       - name: 安装 Inno Setup
         run: choco install innosetup -y --no-progress
@@ -45,17 +47,10 @@ jobs:
       - name: 编译安装程序
         shell: pwsh
         run: |
-          # 诊断：列出关键文件确认存在
-          Write-Host "=== 项目根目录 ==="
-          Get-Location
+          Set-Location $env:GITHUB_WORKSPACE
+
           Write-Host "=== dist 目录内容 ==="
           Get-ChildItem dist -Recurse | Select-Object FullName
-          Write-Host "=== assets 目录 ==="
-          Get-ChildItem assets -ErrorAction SilentlyContinue | Select-Object Name
-          Write-Host "=== LICENSE 文件 ==="
-          Get-ChildItem LICENSE* -ErrorAction SilentlyContinue | Select-Object Name
-          Write-Host "=== installer 目录 ==="
-          Get-ChildItem installer | Select-Object Name
 
           $iscc = @(
             "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
@@ -73,10 +68,6 @@ jobs:
 
           Write-Host "Using ISCC: $iscc"
 
-          # 关键修复：显式 cd 到项目根目录
-          Set-Location $env:GITHUB_WORKSPACE
-
-          # 用绝对路径调用 .iss
           $issPath = Join-Path $env:GITHUB_WORKSPACE "installer\HuayingxiongTTS.iss"
           Write-Host "ISS path: $issPath"
           Write-Host "ISS exists: $(Test-Path $issPath)"
@@ -88,8 +79,8 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          Write-Host "=== dist 目录最终内容 ==="
-          Get-ChildItem dist | Select-Object Name, Length, FullName
+          Write-Host "=== dist 最终内容 ==="
+          Get-ChildItem dist | Select-Object Name, Length
 
       - name: 提取当前版本更新说明
         shell: pwsh
