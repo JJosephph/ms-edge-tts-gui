@@ -8,9 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  APP_VERSION: ${{ github.ref_name }}
-
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -50,20 +47,24 @@ jobs:
 
       - name: 编译安装程序（封装单文件，自动去 v 前缀）
         shell: pwsh
+        env:
+          APP_VERSION: ${{ github.ref_name }}
         run: |
           Set-Location $env:GITHUB_WORKSPACE
           $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { Write-Error "ISCC not found"; exit 1 }
 
-          # ★ 关键：去掉 v 前缀，Inno VersionInfoVersion 只接受纯数字
+          # 去掉 v 前缀（v1.8.0 -> 1.8.0）
           $cleanVer = $env:APP_VERSION -replace '^v', ''
+
+          Write-Host ">>> 编译版本号: $cleanVer (原始 Tag: $env:APP_VERSION)"
 
           & $iscc "/DMyAppVersion=$cleanVer" "installer\HuayingxiongTTS.iss"
 
       - name: 生成 Release 说明
         shell: pwsh
         run: |
-          $tag = "$env:APP_VERSION"
+          $tag = "$env:GITHUB_REF_NAME"
           $body = "# 樺英雄语音合成助手 $tag`n`n"
           $body += "## 更新内容`n`n"
           $body += "- 基于 ms-edge-tts-gui v1.7.0 二次构建`n"
