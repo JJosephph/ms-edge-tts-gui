@@ -1,16 +1,13 @@
 ; ============================================================
-; 樺英雄语音合成助手 - Inno Setup 安装脚本
+; 樺英雄语音合成助手 - Inno Setup 安装脚本 (CI 修复版)
 ; ============================================================
-
 #define MyAppName "樺英雄语音合成助手"
 #ifndef MyAppVersion
-#define MyAppVersion "1.7.9"
+#define MyAppVersion "1.7.11"
 #endif
 #define MyAppPublisher "HuaYingXiong"
 #define MyAppExeName "HuayingxiongTTS.exe"
 #define MyAppURL "https://github.com/sjhznh/ms-edge-tts-gui"
-; 关键：用 SourcePath 宏锚定路径，避免 CI 相对路径解析错误
-#define BasePath "{#SourcePath}\.."
 
 [Setup]
 AppId={{CB391E63-6424-495D-8A55-36B8A4F8087D}
@@ -23,17 +20,13 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\HuayingxiongTTS
 DisableProgramGroupPage=yes
-OutputDir={#BasePath}\dist
+OutputDir=dist
 OutputBaseFilename=HuayingxiongTTS-Setup
-; 注释 icon 测试（若此文件缺失必挂）
-; SetupIconFile={#BasePath}\assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-; 注释 license 测试（若此文件缺失必挂）
-; LicenseFile={#BasePath}\LICENSE
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
@@ -44,6 +37,9 @@ VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName}
 VersionInfoProductName={#MyAppName}
+; 暂注释，等绿了再恢复
+; SetupIconFile=..\assets\app.ico
+; LicenseFile=..\LICENSE
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
@@ -53,11 +49,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}:"
 
 [Files]
-; 主程序目录（日志已确认存在）
-Source: "{#BasePath}\dist\HuayingxiongTTS\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; 暂时注释 license 文件打包
-; Source: "{#BasePath}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-; Source: "{#BasePath}\LICENSE.zh.txt"; DestDir: "{app}"; Flags: ignoreversion
+; 关键修复：基于 installer 目录向上一级找 dist\HuayingxiongTTS
+Source: "..\dist\HuayingxiongTTS\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
