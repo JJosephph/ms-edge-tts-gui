@@ -1,16 +1,18 @@
 ; ============================================================
 ; 樺英雄语音合成助手 - Inno Setup 安装脚本
+; 策略：直接打包 PyInstaller 单文件版（Portable），避免 _internal / python311.dll 问题
 ; ============================================================
 
 #define MyAppName "樺英雄语音合成助手"
 #ifndef MyAppVersion
-#define MyAppVersion "1.7.14"
+#define MyAppVersion "1.7.16"
 #endif
 #define MyAppPublisher "HuaYingXiong"
 #define MyAppExeName "HuayingxiongTTS.exe"
 #define MyAppURL "https://github.com/sjhznh/ms-edge-tts-gui"
 
 [Setup]
+; 换一个新 GUID 也可用 Inno Setup 菜单 Tools -> Generate GUID
 AppId={{CB391E63-6424-495D-8A55-36B8A4F8087D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
@@ -38,6 +40,9 @@ VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName}
 VersionInfoProductName={#MyAppName}
+; 先注释掉，等安装包稳定后再恢复
+; SetupIconFile=..\assets\app.ico
+; LicenseFile=..\LICENSE
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
@@ -47,8 +52,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}:"
 
 [Files]
-; PyInstaller --onedir 输出: dist\HuayingxiongTTS\HuayingxiongTTS.exe
-Source: "..\dist\HuayingxiongTTS\HuayingxiongTTS.exe"; DestDir: "{app}"; Flags: ignoreversion
+; ★ 关键：直接装“单文件版”，安装后改名成 HuayingxiongTTS.exe
+Source: "..\dist\HuayingxiongTTS-Portable.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -70,8 +75,12 @@ begin
   if CurPageID = wpWelcome then
   begin
     if IsZh then
-      WizardForm.WelcomeLabel2.Caption := '欢迎安装 {#MyAppName}（免费开源 MIT License）' + #13#10 + '已内置运行环境，装完即用。'
+      WizardForm.WelcomeLabel2.Caption :=
+        '欢迎安装 {#MyAppName}（免费开源 MIT License）' + #13#10 +
+        '已内置运行环境，装完即用。'
     else
-      WizardForm.WelcomeLabel2.Caption := 'Welcome to {#MyAppName} (Free, MIT License)' + #13#10 + 'Runtime bundled.';
+      WizardForm.WelcomeLabel2.Caption :=
+        'Welcome to {#MyAppName} (Free, MIT License)' + #13#10 +
+        'Runtime bundled.';
   end;
 end;
