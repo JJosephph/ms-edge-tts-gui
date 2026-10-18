@@ -4,15 +4,17 @@
 ; ============================================================
 
 #define MyAppName "樺英雄语音合成助手"
+
+; 版本号：优先用 CI 传入的（已去 v 前缀），否则用兜底值
 #ifndef MyAppVersion
-#define MyAppVersion "1.7.16"
+#define MyAppVersion "1.7.17"
 #endif
+
 #define MyAppPublisher "HuaYingXiong"
 #define MyAppExeName "HuayingxiongTTS.exe"
 #define MyAppURL "https://github.com/sjhznh/ms-edge-tts-gui"
 
 [Setup]
-; 换一个新 GUID 也可用 Inno Setup 菜单 Tools -> Generate GUID
 AppId={{CB391E63-6424-495D-8A55-36B8A4F8087D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
@@ -40,9 +42,6 @@ VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName}
 VersionInfoProductName={#MyAppName}
-; 先注释掉，等安装包稳定后再恢复
-; SetupIconFile=..\assets\app.ico
-; LicenseFile=..\LICENSE
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"
@@ -52,7 +51,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}:"
 
 [Files]
-; ★ 关键：直接装“单文件版”，安装后改名成 HuayingxiongTTS.exe
+; ★ 直接装"单文件版"，安装后改名成 HuayingxiongTTS.exe，无 _internal 依赖
 Source: "..\dist\HuayingxiongTTS-Portable.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 [Icons]
