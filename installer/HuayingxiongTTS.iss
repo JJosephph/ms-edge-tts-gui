@@ -1,6 +1,5 @@
 ; ============================================================
 ; 樺英雄语音合成助手 - Inno Setup 安装脚本
-; 使用前请先运行 build_release.bat 生成 dist\HuayingxiongTTS\
 ; 免费开源（MIT License）· 开发者 HuaYingXiong · 支持卸载
 ; ============================================================
 
@@ -27,13 +26,15 @@ DefaultDirName={autopf}\HuayingxiongTTS
 DisableProgramGroupPage=yes
 OutputDir=..\dist
 OutputBaseFilename=HuayingxiongTTS-Setup
-SetupIconFile=..\assets\app.ico
+; 关键修复：用绝对路径宏确保 CI 能找到
+SetupIconFile={#SourcePath}\..\assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-LicenseFile=..\LICENSE
+; 关键修复：用 {#SourcePath} 宏
+LicenseFile={#SourcePath}\..\LICENSE
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
@@ -46,16 +47,16 @@ VersionInfoDescription={#MyAppName}
 VersionInfoProductName={#MyAppName}
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"; LicenseFile: "..\LICENSE.zh.txt"
-Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "..\LICENSE"
+Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"; LicenseFile: "{#SourcePath}\..\LICENSE.zh.txt"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "{#SourcePath}\..\LICENSE"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}:"
 
 [Files]
-Source: "..\dist\HuayingxiongTTS\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\LICENSE.zh.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\dist\HuayingxiongTTS\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\..\LICENSE.zh.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -82,7 +83,7 @@ begin
       WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：HuaYingXiong（QQ 562297979）。' + #13#10 + #13#10 +
         '已内置 Python 运行环境，无需额外安装，装完即可使用。' + #13#10 + #13#10 +
         '仓库地址：https://github.com/sjhznh/ms-edge-tts-gui' + #13#10 +
-        '点击“下一步”选择安装位置（任意磁盘或文件夹），然后开始安装。';
+        '点击"下一步"选择安装位置（任意磁盘或文件夹），然后开始安装。';
     end
     else
     begin
