@@ -1,5 +1,14 @@
 # Release Notes
+## v1.7.8
 
+- 重命名为「樺英雄语音合成助手」（HuayingxiongTTS）
+- 更新开发者信息：HuaYingXiong（QQ 562297979）
+- 更新仓库地址为 sjhznh/ms-edge-tts-gui
+- 基于原项目 v1.7.0 二次构建
+
+## v1.7.0
+
+- 新增普通模式批量文件工作流
 ## v1.7.0
 
 ### New
