@@ -68,7 +68,7 @@ jobs:
           $body = "# 樺英雄语音合成助手 $tag`n`n"
           $body += "## 更新内容`n`n"
           $body += "- 基于 ms-edge-tts-gui v1.7.0 二次构建`n"
-          $body += "- 开发者: HuaYingXiong (QQ 562297979)`n"
+          $body += "- 开发者: 樺英雄 (QQ 562297979)`n"
           $body += "- 仓库: https://github.com/sjhznh/ms-edge-tts-gui`n`n"
           $body += "## 下载说明`n`n"
           $body += "| 文件 | 说明 |`n"
