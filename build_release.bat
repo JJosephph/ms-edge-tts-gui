@@ -24,20 +24,20 @@ if not exist ".venv\Scripts\python.exe" (
 
 ".venv\Scripts\python.exe" -m pip install -r requirements-dev.txt
 
- echo Building application directory...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "EdgeTTSGui" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+echo Building application directory...
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "HuayingxiongTTS" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 if errorlevel 1 exit /b 1
-if not exist "dist\EdgeTTSGui\EdgeTTSGui.exe" exit /b 1
+if not exist "dist\HuayingxiongTTS\HuayingxiongTTS.exe" exit /b 1
 
- echo Building portable executable...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name "EdgeTTSGui-Portable" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+echo Building portable executable...
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name "HuayingxiongTTS-Portable" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 if errorlevel 1 exit /b 1
-if not exist "dist\EdgeTTSGui-Portable.exe" exit /b 1
+if not exist "dist\HuayingxiongTTS-Portable.exe" exit /b 1
 
- echo Building installer...
-"%ISCC%" "installer\EdgeTTSGui.iss"
+echo Building installer...
+"%ISCC%" "installer\HuayingxiongTTS.iss"
 if errorlevel 1 exit /b 1
 
 echo Build complete.
-echo Installer: dist\EdgeTTSGui-Setup.exe
-echo Portable:  dist\EdgeTTSGui-Portable.exe
+echo Installer: dist\HuayingxiongTTS-Setup.exe
+echo Portable:  dist\HuayingxiongTTS-Portable.exe
