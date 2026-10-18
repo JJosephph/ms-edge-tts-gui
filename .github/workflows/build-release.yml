@@ -45,6 +45,18 @@ jobs:
       - name: 编译安装程序
         shell: pwsh
         run: |
+          # 诊断：列出关键文件确认存在
+          Write-Host "=== 项目根目录 ==="
+          Get-Location
+          Write-Host "=== dist 目录内容 ==="
+          Get-ChildItem dist -Recurse | Select-Object FullName
+          Write-Host "=== assets 目录 ==="
+          Get-ChildItem assets -ErrorAction SilentlyContinue | Select-Object Name
+          Write-Host "=== LICENSE 文件 ==="
+          Get-ChildItem LICENSE* -ErrorAction SilentlyContinue | Select-Object Name
+          Write-Host "=== installer 目录 ==="
+          Get-ChildItem installer | Select-Object Name
+
           $iscc = @(
             "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
             "C:\Program Files\Inno Setup 6\ISCC.exe"
@@ -60,9 +72,24 @@ jobs:
           }
 
           Write-Host "Using ISCC: $iscc"
-          & $iscc "/DMyAppVersion=$env:APP_VERSION" "installer\HuayingxiongTTS.iss"
 
-          Get-ChildItem dist | Select-Object Name, Length
+          # 关键修复：显式 cd 到项目根目录
+          Set-Location $env:GITHUB_WORKSPACE
+
+          # 用绝对路径调用 .iss
+          $issPath = Join-Path $env:GITHUB_WORKSPACE "installer\HuayingxiongTTS.iss"
+          Write-Host "ISS path: $issPath"
+          Write-Host "ISS exists: $(Test-Path $issPath)"
+
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" "$issPath"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ISCC compilation failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+          Write-Host "=== dist 目录最终内容 ==="
+          Get-ChildItem dist | Select-Object Name, Length, FullName
 
       - name: 提取当前版本更新说明
         shell: pwsh
