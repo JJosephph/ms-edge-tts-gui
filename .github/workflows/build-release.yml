@@ -3,104 +3,83 @@ name: Build Release
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 permissions:
   contents: write
 
+env:
+  APP_VERSION: ${{ github.ref_name }}
+
 jobs:
   build-windows:
     runs-on: windows-latest
+
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 设置 Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: '3.11'
 
-      - name: 安装依赖
+      - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -r requirements.txt
+          pip install pyinstaller
 
-      - name: 生成版本信息
-        shell: bash
+      - name: PyInstaller 打包（单文件 Portable）
+        shell: pwsh
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
-          sed -i "s/APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" app.py
-
-      - name: PyInstaller 打包（目录版 → dist/HuayingxiongTTS/HuayingxiongTTS.exe）
-        run: |
-          pyinstaller --noconfirm --clean --onedir --windowed --name HuayingxiongTTS --icon assets/app.ico --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
-
-      - name: PyInstaller 打包（便携单文件版）
-        run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name HuayingxiongTTS-Portable --icon assets/app.ico --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+          pyinstaller -F -w -n HuayingxiongTTS-Portable `
+            --icon assets/app.ico `
+            --collect-all tkinterdnd2 `
+            --hidden-import docx `
+            --hidden-import pypdf `
+            --hidden-import miniaudio `
+            --hidden-import lameenc `
+            --hidden-import cffi `
+            --hidden-import _cffi_backend `
+            app.py
 
       - name: 安装 Inno Setup
         run: choco install innosetup -y --no-progress
 
-      - name: 编译安装程序
+      - name: 编译安装程序（封装单文件）
         shell: pwsh
         run: |
           Set-Location $env:GITHUB_WORKSPACE
+          $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { Write-Error "ISCC not found"; exit 1 }
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" "installer\HuayingxiongTTS.iss"
 
-          Write-Host "=== dist 目录内容 ==="
-          Get-ChildItem dist -Recurse | Select-Object FullName
-
-          $iscc = @(
-            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-            "C:\Program Files\Inno Setup 6\ISCC.exe"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-          if (-not $iscc) {
-            $iscc = Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          }
-
-          if (-not $iscc) {
-            Write-Error "Inno Setup compiler not found!"
-            exit 1
-          }
-
-          Write-Host "Using ISCC: $iscc"
-
-          $issPath = Join-Path $env:GITHUB_WORKSPACE "installer\HuayingxiongTTS.iss"
-          Write-Host "ISS path: $issPath"
-          Write-Host "ISS exists: $(Test-Path $issPath)"
-
-          & $iscc "/DMyAppVersion=$env:APP_VERSION" "$issPath"
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "ISCC compilation failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
-
-          Write-Host "=== dist 最终内容 ==="
-          Get-ChildItem dist | Select-Object Name, Length
-
-      - name: 提取当前版本更新说明
+      - name: 生成 Release 说明
         shell: pwsh
         run: |
-          $version = $env:APP_VERSION
-          $content = Get-Content RELEASE_NOTES.md -Raw
-          $pattern = "(?ms)^## v$([regex]::Escape($version))\s*\r?\n(.*?)(?=^## v|\z)"
-          $match = [regex]::Match($content, $pattern)
-          if ($match.Success) {
-            $body = "## v$version`n`n" + $match.Groups[1].Value.Trim()
-          } else {
-            $body = "Release v$version"
-          }
-          Set-Content -Path release_body.md -Value $body -Encoding utf8
+          $tag = "$env:APP_VERSION"
+          $body = "# 樺英雄语音合成助手 $tag`n`n"
+          $body += "## 更新内容`n`n"
+          $body += "- 基于 ms-edge-tts-gui v1.7.0 二次构建`n"
+          $body += "- 开发者: HuaYingXiong (QQ 562297979)`n"
+          $body += "- 仓库: https://github.com/sjhznh/ms-edge-tts-gui`n`n"
+          $body += "## 下载说明`n`n"
+          $body += "| 文件 | 说明 |`n"
+          $body += "|------|------|`n"
+          $body += "| `HuayingxiongTTS-Setup.exe` | 安装版（推荐），装完即用 |`n"
+          $body += "| `HuayingxiongTTS-Portable.exe` | 单文件便携版，双击直接运行 |`n"
+          $body += "`n## 校验`n`n"
+          $body += "安装包已内置 Python 运行环境，Windows 10+ 无需额外安装。MIT License 免费开源。`n"
+          [System.IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\release_body.md", $body, [System.Text.Encoding]::UTF8)
 
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_body.md
           files: |
-            dist/HuayingxiongTTS/HuayingxiongTTS.exe
             dist/HuayingxiongTTS-Portable.exe
             dist/HuayingxiongTTS-Setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
