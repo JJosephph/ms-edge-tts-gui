@@ -1,11 +1,10 @@
 ; ============================================================
 ; 樺英雄语音合成助手 - Inno Setup 安装脚本
-; 免费开源（MIT License）· 开发者 HuaYingXiong · 支持卸载
 ; ============================================================
 
 #define MyAppName "樺英雄语音合成助手"
 #ifndef MyAppVersion
-#define MyAppVersion "1.7.13"
+#define MyAppVersion "1.7.14"
 #endif
 #define MyAppPublisher "HuaYingXiong"
 #define MyAppExeName "HuayingxiongTTS.exe"
@@ -20,8 +19,6 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-AppComments=Free open-source software (MIT License) / 免费开源软件（MIT License）
-AppCopyright=Copyright (c) 2026 HuaYingXiong (QQ 562297979)
 DefaultDirName={autopf}\HuayingxiongTTS
 DisableProgramGroupPage=yes
 OutputDir=..\dist
@@ -50,8 +47,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}:"
 
 [Files]
-; ★ 关键修复：匹配 PyInstaller 实际输出的单文件
-Source: "..\dist\HuayingxiongTTS.exe"; DestDir: "{app}"; Flags: ignoreversion
+; PyInstaller --onedir 输出: dist\HuayingxiongTTS\HuayingxiongTTS.exe
+Source: "..\dist\HuayingxiongTTS\HuayingxiongTTS.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -59,7 +56,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
-Filename: "{#MyAppURL}"; Description: "打开 GitHub 为开源项目点 Star / Open GitHub and Star the open-source project"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
+Filename: "{#MyAppURL}"; Description: "打开 GitHub 为开源项目点 Star"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -73,37 +70,8 @@ begin
   if CurPageID = wpWelcome then
   begin
     if IsZh then
-    begin
-      WizardForm.WelcomeLabel1.Caption := '欢迎安装 {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：HuaYingXiong（QQ 562297979）。' + #13#10 + #13#10 +
-        '已内置 Python 运行环境，无需额外安装，装完即可使用。' + #13#10 + #13#10 +
-        '仓库地址：https://github.com/sjhznh/ms-edge-tts-gui' + #13#10 +
-        '点击"下一步"选择安装位置（任意磁盘或文件夹），然后开始安装。';
-    end
+      WizardForm.WelcomeLabel2.Caption := '欢迎安装 {#MyAppName}（免费开源 MIT License）' + #13#10 + '已内置运行环境，装完即用。'
     else
-    begin
-      WizardForm.WelcomeLabel1.Caption := 'Welcome to {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (MIT License) by HuaYingXiong (QQ 562297979).' + #13#10 + #13#10 +
-        'No Python required - the runtime is bundled. Install & use right away.' + #13#10 + #13#10 +
-        'Repository: https://github.com/sjhznh/ms-edge-tts-gui' + #13#10 +
-        'Click Next to choose an install location (any drive), then install.';
-    end;
-  end;
-  if CurPageID = wpFinished then
-  begin
-    if IsZh then
-    begin
-      WizardForm.FinishedLabel.Caption := '安装完成！' + #13#10 + #13#10 +
-        '觉得这个开源项目好用？请到 GitHub 点个 Star 支持我们：' + #13#10 +
-        'https://github.com/sjhznh/ms-edge-tts-gui' + #13#10 +
-        '欢迎在仓库提交反馈或 Issue。';
-    end
-    else
-    begin
-      WizardForm.FinishedLabel.Caption := 'Installation completed!' + #13#10 + #13#10 +
-        'Enjoy this open-source project? Please Star it on GitHub to support us:' + #13#10 +
-        'https://github.com/sjhznh/ms-edge-tts-gui' + #13#10 +
-        'Feedback and issues are also welcome.';
-    end;
+      WizardForm.WelcomeLabel2.Caption := 'Welcome to {#MyAppName} (Free, MIT License)' + #13#10 + 'Runtime bundled.';
   end;
 end;
