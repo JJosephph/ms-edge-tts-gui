@@ -2,8 +2,16 @@
 > 本软件基于 [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui) 
 > （MIT License）修改，原作者 **WangYufan**（QQ 1471056247）。
 > 本分支由 **樺英雄 / HuaYingXiong**（QQ 562297979）维护与定制。
-> 本分支修改版权归 **樺英雄 / HuaYingXiong** 所有。
+> > **Fork / 修改声明 · Fork Notice**
+> 本分支基于 [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui)（© WangYufan，MIT License）修改。
+> 原项目：https://github.com/JJosephph/ms-edge-tts-gui
+> 本分支修改版权归 **樺英雄 / HuaYingXiong**（QQ 562297979）所有。
 > 与原作者无隶属关系，未获其背书。
+> 
+> This fork is based on [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui) (© WangYufan, MIT License).
+> Modifications copyright © 2026 HuaYingXiong / 樺英雄. No affiliation with or endorsement by the original author.
+
+---
 > 感谢原作者的开源贡献！🙏
 > ## 许可证 / License
 
