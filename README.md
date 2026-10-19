@@ -527,6 +527,8 @@ Released under the [MIT License](LICENSE) · 中文版见 [LICENSE.zh.txt](LICEN
 - **Maintainer:** 	
 HuaYingXiong（QQ 562297979）
 - **Repository:** https://github.com/sjhznh/ms-edge-tts-gui
-本软件基于 JJosephph/ms-edge-tts-gui（MIT License）修改，
-原作者 WangYufan；本分支由 樺英雄 维护与定制。周知  感谢原作者的辛勤付出！
-原作者仓库 https://github.com/JJosephph/ms-edge-tts-gui
+
+- 本软件基于 JJosephph/ms-edge-tts-gui（MIT License）修改，本分支由 樺英雄 维护与定制；周知！感谢原作者的辛勤付出！
+
+- 原作者 WangYufan （QQ 147105624）
+- 原作者仓库 https://github.com/JJosephph/ms-edge-tts-gui
