@@ -1,4 +1,12 @@
 # 樺英雄语音合成助手 / HuayingxiongTTS
+> 本软件基于 [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui) 
+> （MIT License）修改，原作者 **WangYufan**（QQ 1471056247）。
+> 本分支由 **樺英雄 / HuaYingXiong**（QQ 562297979）维护与定制。
+> 感谢原作者的开源贡献！🙏
+> ## 许可证 / License
+
+本软件遵循 [MIT License](LICENSE.zh.txt)。
+原项目版权归 WangYufan 所有，本分支修改版权归 樺英雄 所有。
 
 <p align="center">
   <strong>Turn text into clear, natural voice.</strong><br>
