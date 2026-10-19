@@ -346,7 +346,7 @@ class App(ctk.CTk):
         "update_empty_notes": {"zh": "此版本未提供更新说明，请打开发布页查看。", "en": "No release notes were provided. Open the release page for details."},
         "repo": {"zh": "GitHub 仓库 ↗", "en": "GitHub Repo ↗"},
         "star": {"zh": "⭐ 去 GitHub 点 Star", "en": "⭐ Star on GitHub"},
-        "developer": {"zh": "开发者", "en": "Developer"},
+        "developer": {"zh": "维护者", "en": "Maintainer"},
         "language": {"zh": "EN", "en": "中文"},
         "settings": {"zh": "设置", "en": "Settings"},
         "theme_dark": {"zh": "夜间", "en": "Dark"},

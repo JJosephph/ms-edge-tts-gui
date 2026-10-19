@@ -5,18 +5,19 @@
 > > **Fork / 修改声明 · Fork Notice**
 > 本分支基于 [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui)（© WangYufan，MIT License）修改。
 > 原项目：https://github.com/JJosephph/ms-edge-tts-gui
-> 本分支修改版权归 **樺英雄 / HuaYingXiong**（QQ 562297979）所有。
+> 本分支新增修改版权归 **樺英雄 / HuaYingXiong**（QQ 562297979）所有。
 > 与原作者无隶属关系，未获其背书。
 > 
 > This fork is based on [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui) (© WangYufan, MIT License).
 > Modifications copyright © 2026 HuaYingXiong / 樺英雄. No affiliation with or endorsement by the original author.
+> 详细版权和许可证范围见 [FORK_NOTICE.md](FORK_NOTICE.md)。
 
 ---
 > 感谢原作者的开源贡献！🙏
 > ## 许可证 / License
 
 本软件遵循 [MIT License](LICENSE.zh.txt)。
-原项目版权归 WangYufan 所有，本分支修改版权归 樺英雄 所有。
+原项目版权归 WangYufan 所有，本分支新增修改版权归 樺英雄 所有。
 
 <p align="center">
   <strong>Turn text into clear, natural voice.</strong><br>
@@ -44,12 +45,12 @@
 
 ## 赞赏支持 / Support the Author
 
-> **中文**：这个工具完全免费、开源（MIT License），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请作者喝一杯咖啡，支持项目继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
+> **中文**：这个工具完全免费、开源（MIT License），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请本修改版维护者喝一杯咖啡，支持本分支继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
 >
-> **English**: This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
+> **English**: This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the fork maintainer a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
 
 <p align="center">
-  <img src="assets/donate-wechat-pay.jpg" alt="微信支付收款码：扫码请作者喝一杯咖啡 / WeChat Pay QR code" width="320">
+  <img src="assets/donate-wechat-pay.jpg" alt="微信支付收款码：扫码请本修改版维护者喝一杯咖啡 / WeChat Pay QR code" width="320">
 </p>
 <p align="center">
   <sub>微信扫码 · 金额随意 · 感谢支持 / Scan with WeChat · any amount · thank you</sub>
@@ -73,7 +74,7 @@ HuaYingXiong** (QQ 562297979).
 
 ## 中文说明
 
-**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 	
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，本修改版维护者 	
 HuaYingXiong）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
 ### v1.7.0 更新亮点
@@ -261,7 +262,7 @@ lines_archive.zip
 1. 在 [Releases](https://github.com/sjhznh/ms-edge-tts-gui/releases) 下载 `HuayingxiongTTS-Setup.exe`，安装时可选任意磁盘或文件夹。
 2. 安装包与便携版 EXE 均已内置 Python 运行环境，Windows 10 及更高版本无需另行安装 Python。
 3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，点击“生成音频”合成一次；之后点“试听”播放，或点“保存下载”导出 MP3，全程无需重复合成。
-4. 安装包会标明“免费 · 开源（MIT License）· 开发者 	
+4. 安装包会标明“免费 · 开源（MIT License）· 本修改版维护者 	
 HuaYingXiong”，支持从 Windows“设置 → 应用”或安装目录中的 `unins000.exe` 卸载。
 
 ---
@@ -269,7 +270,7 @@ HuaYingXiong”，支持从 Windows“设置 → 应用”或安装目录中的 
 ## English Guide
 
 
-**Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **	
+**Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, maintained as a fork by **	
 HuaYingXiong**.
 
 The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. Normal mode also includes an embedded **Batch Upload** workspace: paste text as before, or drop/select multiple files, configure each row independently, generate all files, and export a ZIP. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page, line, or file batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt help with real-world network conditions.
@@ -548,5 +549,5 @@ HuaYingXiong（QQ 562297979）
 
 - 本软件基于 JJosephph/ms-edge-tts-gui（MIT License）修改，本分支由 樺英雄 维护与定制；周知！感谢原作者！
 
-- 原作者 WangYufan （QQ 147105624）
+- 原作者 WangYufan （QQ 1471056247）
 - 原作者仓库 https://github.com/JJosephph/ms-edge-tts-gui
