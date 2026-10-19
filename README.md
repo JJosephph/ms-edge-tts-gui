@@ -2,6 +2,8 @@
 > 本软件基于 [JJosephph/ms-edge-tts-gui](https://github.com/JJosephph/ms-edge-tts-gui) 
 > （MIT License）修改，原作者 **WangYufan**（QQ 1471056247）。
 > 本分支由 **樺英雄 / HuaYingXiong**（QQ 562297979）维护与定制。
+> 本分支修改版权归 **樺英雄 / HuaYingXiong** 所有。
+> 与原作者无隶属关系，未获其背书。
 > 感谢原作者的开源贡献！🙏
 > ## 许可证 / License
 
