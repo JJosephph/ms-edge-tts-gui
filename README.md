@@ -49,12 +49,12 @@
 
 ## ⭐ 求点赞 · 请先读我 / Star Us · Please Read First
 
-> **中文**：本项目 **免费、开源（MIT License）**，开发者 **	
+> **中文**：本项目 **免费、开源（MIT License）**，维护者 **	
 HuaYingXiong**（QQ 562297979）。
 > 仓库地址：https://github.com/sjhznh/ms-edge-tts-gui
 > 如果你觉得这个工具对你有帮助，请先到仓库点一个 **Star**，让更多用户能找到它；使用中遇到问题，欢迎提交 [Issue](https://github.com/sjhznh/ms-edge-tts-gui/issues) 或 PR。
 
-> **English**: This project is **free and open source (MIT License)**, developed by **	
+> **English**: This project is **free and open source (MIT License)**, Maintained by **	
 HuaYingXiong** (QQ 562297979).
 > Repository: https://github.com/sjhznh/ms-edge-tts-gui
 > If this tool helps you, please **Star** the repository first so more users can discover it; issues and pull requests are welcome.
