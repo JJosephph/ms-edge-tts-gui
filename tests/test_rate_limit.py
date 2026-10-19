@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 import asyncio
 import tempfile
 import unittest

@@ -1,7 +1,9 @@
 ﻿; ============================================================
 ; Edge TTS 语音合成助手 - Inno Setup 安装脚本
 ; 使用前请先运行 build_release.bat 生成 dist\EdgeTTSGui\
-; 免费开源（MIT License）· 开发者 WangYufan · 支持卸载
+; 免费开源（GPL-3.0-or-later）· 开发者 WangYufan · 支持卸载
+; SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+; SPDX-License-Identifier: GPL-3.0-or-later
 ; ============================================================
 
 #define MyAppName "Edge TTS 语音合成助手"
@@ -21,7 +23,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-AppComments=Free open-source software (MIT License) / 免费开源软件（MIT License）
+AppComments=Free open-source software (GPL-3.0-or-later) / 免费开源软件（GPL-3.0-or-later）
 AppCopyright=Copyright (c) 2026 WangYufan (QQ 1471056247)
 DefaultDirName={autopf}\EdgeTTSGui
 DisableProgramGroupPage=yes
@@ -46,7 +48,7 @@ VersionInfoDescription={#MyAppName}
 VersionInfoProductName={#MyAppName}
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"; LicenseFile: "..\LICENSE.zh.txt"
+Name: "chinesesimp"; MessagesFile: "Languages\ChineseSimplified.isl"; LicenseFile: "..\LICENSE"
 Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "..\LICENSE"
 
 [Tasks]
@@ -56,6 +58,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\dist\EdgeTTSGui\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE.zh.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\TRADEMARKS.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\RELEASE_VERIFICATION.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -79,7 +84,7 @@ begin
     if IsZh then
     begin
       WizardForm.WelcomeLabel1.Caption := '欢迎安装 {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（MIT License），开发者：WangYufan（QQ 1471056247）。' + #13#10 + #13#10 +
+      WizardForm.WelcomeLabel2.Caption := '这是一款免费、开源的桌面软件（GPL-3.0-or-later），开发者：WangYufan（QQ 1471056247）。' + #13#10 + #13#10 +
         '已内置 Python 运行环境，无需额外安装，装完即可使用。' + #13#10 + #13#10 +
         '仓库地址：https://github.com/JJosephph/ms-edge-tts-gui' + #13#10 +
         '点击“下一步”选择安装位置（任意磁盘或文件夹），然后开始安装。';
@@ -87,7 +92,7 @@ begin
     else
     begin
       WizardForm.WelcomeLabel1.Caption := 'Welcome to {#MyAppName}';
-      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (MIT License) by WangYufan (QQ 1471056247).' + #13#10 + #13#10 +
+      WizardForm.WelcomeLabel2.Caption := 'A free, open-source desktop app (GPL-3.0-or-later) by WangYufan (QQ 1471056247).' + #13#10 + #13#10 +
         'No Python required - the runtime is bundled. Install & use right away.' + #13#10 + #13#10 +
         'Repository: https://github.com/JJosephph/ms-edge-tts-gui' + #13#10 +
         'Click Next to choose an install location (any drive), then install.';

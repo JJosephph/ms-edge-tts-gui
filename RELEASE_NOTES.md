@@ -1,5 +1,19 @@
 # Release Notes
 
+## Unreleased
+
+### Changed
+
+- 项目默认分支和后续版本切换为 `GPL-3.0-or-later`。`v1.7.0` 及更早版本仍按其原有的 MIT License 授权，已有授权不会被追溯撤销。
+- 新增 `NOTICE`、`TRADEMARKS.md` 和 `RELEASE_VERIFICATION.md`，分别说明项目版权、名称与品牌使用边界、发布哈希与构建来源验证方式。
+- 安装器改为展示权威英文 GPL 原文；`LICENSE.zh.txt` 仅作为中文参考说明，不再作为正式许可证文本。
+- 发布工作流新增 `SHA256SUMS.txt` 和 GitHub build provenance attestation，正式 Release 会同时附带许可证、NOTICE 和验证说明。
+
+### Notes
+
+- 如果你分发本项目的新版本或修改版，请保留 `LICENSE`、`NOTICE` 和原版权声明，并按 GPL 提供对应源代码。
+- GPL 允许修改、再分发、商业使用和接受捐赠，但衍生版本不能改为闭源或添加与 GPL 冲突的额外限制。
+
 ## v1.7.0
 
 ### New

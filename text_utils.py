@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 """文本清理：把用户粘贴的文章/Markdown/HTML 转成适合朗读的纯文本。"""
 
 import html

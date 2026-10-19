@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Batch text header rules and filename helpers.
 
 The file-batch workflow uses one optional header line at the top of a text

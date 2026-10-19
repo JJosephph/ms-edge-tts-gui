@@ -1,4 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 """语音分组引擎：把远端一次性拉取的语音列表，按 语言 → 性别 → 音色 本地分组。
 
 设计目标

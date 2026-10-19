@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 """TTS 合成引擎：封装 edge-tts，内置网络探测与“卡住”检测。
 
 设计要点

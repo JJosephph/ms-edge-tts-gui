@@ -1,0 +1,31 @@
+Edge TTS 语音合成助手 / Edge TTS Voice Studio
+Copyright (c) 2026 WangYufan (QQ 1471056247)
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Project repository:
+https://github.com/JJosephph/ms-edge-tts-gui
+
+Historical license notice:
+Versions up to and including v1.7.0 were released under the MIT
+License. Those existing grants are not revoked by this license change.
+The current default branch and future releases use GPL-3.0-or-later.
+
+Third-party components:
+This project depends on third-party Python packages listed in
+requirements.txt and requirements-dev.txt. Those components remain
+under their own licenses. See each dependency's distribution for
+its complete license and notice terms.

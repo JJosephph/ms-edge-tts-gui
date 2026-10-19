@@ -1,4 +1,6 @@
 @echo off
+rem SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+rem SPDX-License-Identifier: GPL-3.0-or-later
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -38,6 +40,10 @@ if not exist "dist\EdgeTTSGui-Portable.exe" exit /b 1
 "%ISCC%" "installer\EdgeTTSGui.iss"
 if errorlevel 1 exit /b 1
 
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\generate_checksums.ps1"
+if errorlevel 1 exit /b 1
+
 echo Build complete.
 echo Installer: dist\EdgeTTSGui-Setup.exe
 echo Portable:  dist\EdgeTTSGui-Portable.exe
+echo Checksums: dist\SHA256SUMS.txt

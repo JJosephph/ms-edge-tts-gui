@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Edge TTS 语音合成助手 —— 现代化桌面 GUI 客户端。
 
 功能：
@@ -328,7 +330,7 @@ class App(ctk.CTk):
 
     TRANSLATIONS = {
         "app": {"zh": "Edge TTS 语音合成助手", "en": "Edge TTS Voice Studio"},
-        "open": {"zh": "开源 · MIT License", "en": "Open Source · MIT License"},
+        "open": {"zh": "开源 · GPL-3.0-or-later", "en": "Open Source · GPL-3.0-or-later"},
         "open_badge": {"zh": "免费 · 开源", "en": "Free · Open Source"},
         "github_repo": {"zh": "GitHub 仓库", "en": "GitHub"},
         "github_star": {"zh": "GitHub 点赞", "en": "Star on GitHub"},
@@ -472,7 +474,7 @@ class App(ctk.CTk):
         "no_audio": {"zh": "请先点击“生成音频”生成一段音频。", "en": "Please click “Generate Audio” first."},
         "stop": {"zh": "停止", "en": "Stop"},
         "log": {"zh": "活动日志", "en": "Activity log"},
-        "footer": {"zh": "免费开源软件 · MIT License · Powered by Microsoft Edge TTS", "en": "Free open-source software · MIT License · Powered by Microsoft Edge TTS"},
+        "footer": {"zh": "免费开源软件 · GPL-3.0-or-later · Powered by Microsoft Edge TTS", "en": "Free open-source software · GPL-3.0-or-later · Powered by Microsoft Edge TTS"},
         "repository": {"zh": "仓库：", "en": "Repo: "},
         "empty": {"zh": "请输入文章内容。", "en": "Please enter some article text."},
         "import_file": {"zh": "导入文件", "en": "Import File"},

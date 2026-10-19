@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://github.com/JJosephph/ms-edge-tts-gui/releases"><img src="https://img.shields.io/github/v/release/JJosephph/ms-edge-tts-gui?display_name=tag&sort=semver&color=5A8CFF" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-61D69C.svg" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-61D69C.svg" alt="GPL-3.0-or-later"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-356FEB.svg" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/Platform-Windows-5A8CFF.svg" alt="Windows">
   <a href="https://github.com/JJosephph/ms-edge-tts-gui/stargazers"><img src="https://img.shields.io/github/stars/JJosephph/ms-edge-tts-gui?style=flat&color=F6C66C" alt="GitHub stars"></a>
@@ -26,9 +26,9 @@
 
 ## 赞赏支持 / Support the Author
 
-> **中文**：这个工具完全免费、开源（MIT License），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请作者喝一杯咖啡，支持项目继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
+> **中文**：这个工具完全免费、开源（GPL-3.0-or-later），没有广告，也没有任何付费功能。如果它确实帮到了你，欢迎扫码请作者喝一杯咖啡，支持项目继续维护和更新；不打赏也完全不影响使用，点个 Star 同样是最好的支持。
 >
-> **English**: This tool is free and open source under the MIT License, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
+> **English**: This tool is free and open source under the GPL-3.0-or-later license, with no ads and no paid features. If it saves you time, you are welcome to buy the author a coffee with the WeChat Pay QR code below. The project stays free either way, and a **Star** is just as valuable.
 
 <p align="center">
   <img src="assets/donate-wechat-pay.jpg" alt="微信支付收款码：扫码请作者喝一杯咖啡 / WeChat Pay QR code" width="320">
@@ -41,11 +41,11 @@
 
 ## ⭐ 求点赞 · 请先读我 / Star Us · Please Read First
 
-> **中文**：本项目 **免费、开源（MIT License）**，开发者 **WangYufan**（QQ 1471056247）。
+> **中文**：本项目 **免费、开源（GPL-3.0-or-later）**，开发者 **WangYufan**（QQ 1471056247）。
 > 仓库地址：https://github.com/JJosephph/ms-edge-tts-gui
 > 如果你觉得这个工具对你有帮助，请先到仓库点一个 **Star**，让更多用户能找到它；使用中遇到问题，欢迎提交 [Issue](https://github.com/JJosephph/ms-edge-tts-gui/issues) 或 PR。
 
-> **English**: This project is **free and open source (MIT License)**, developed by **WangYufan** (QQ 1471056247).
+> **English**: This project is **free and open source (GPL-3.0-or-later)**, developed by **WangYufan** (QQ 1471056247).
 > Repository: https://github.com/JJosephph/ms-edge-tts-gui
 > If this tool helps you, please **Star** the repository first so more users can discover it; issues and pull requests are welcome.
 
@@ -53,7 +53,7 @@
 
 ## 中文说明
 
-**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（MIT License，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
+**Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（GPL-3.0-or-later，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
 ### v1.7.0 更新亮点
 
@@ -240,14 +240,14 @@ lines_archive.zip
 1. 在 [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) 下载 `EdgeTTSGui-Setup.exe`，安装时可选任意磁盘或文件夹。
 2. 安装包与便携版 EXE 均已内置 Python 运行环境，Windows 10 及更高版本无需另行安装 Python。
 3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，点击“生成音频”合成一次；之后点“试听”播放，或点“保存下载”导出 MP3，全程无需重复合成。
-4. 安装包会标明“免费 · 开源（MIT License）· 开发者 WangYufan”，支持从 Windows“设置 → 应用”或安装目录中的 `unins000.exe` 卸载。
+4. 安装包会标明“免费 · 开源（GPL-3.0-or-later）· 开发者 WangYufan”，支持从 Windows“设置 → 应用”或安装目录中的 `unins000.exe` 卸载。
 
 ---
 
 ## English Guide
 
 
-**Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the MIT License**, developed by **WangYufan**.
+**Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the GPL-3.0-or-later license**, developed by **WangYufan**.
 
 The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. Normal mode also includes an embedded **Batch Upload** workspace: paste text as before, or drop/select multiple files, configure each row independently, generate all files, and export a ZIP. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page, line, or file batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt help with real-world network conditions.
 
@@ -360,13 +360,13 @@ Open the [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) page 
 
 | Package | What it is | Best for | Notes |
 | --- | --- | --- | --- |
-| `EdgeTTSGui-Setup.exe` | Installer (Inno Setup) | Most Windows users | Bilingual (中文/English) wizard that states **free & open source (MIT License)** and **developer WangYufan**; choose any drive/folder; desktop shortcut; **full uninstall support**; Star prompt after install. |
+| `EdgeTTSGui-Setup.exe` | Installer (Inno Setup) | Most Windows users | Bilingual (中文/English) wizard that states **free & open source (GPL-3.0-or-later)** and **developer WangYufan**; choose any drive/folder; desktop shortcut; **full uninstall support**; Star prompt after install. |
 | `EdgeTTSGui-Portable.exe` | Single-file portable | Take-anywhere / no-install use | Python runtime and libraries bundled in one file; double-click to run; largest download. |
 | `EdgeTTSGui/EdgeTTSGui.exe` | Main launcher of the folder build | Advanced / manual deployment | Small 5 MB launcher — it needs its sibling `_internal\` folder to run, so treat the whole `EdgeTTSGui\` folder as the package. |
 
 **Which one should I download?** If you are not sure, pick `EdgeTTSGui-Setup.exe` — it installs cleanly and can be uninstalled. `EdgeTTSGui-Portable.exe` is the drop-in no-install choice.
 
-All packages are **free and open source (MIT License)**, maintained by **WangYufan**.
+All packages are **free and open source (GPL-3.0-or-later)**, maintained by **WangYufan**.
 
 ### Is Python included?
 
@@ -515,7 +515,17 @@ Issues, feature requests, and pull requests are welcome. If this project helps y
 
 ## License
 
-Released under the [MIT License](LICENSE) · 中文版见 [LICENSE.zh.txt](LICENSE.zh.txt).
+Released under the [GNU General Public License v3.0 or later](LICENSE)
+(`GPL-3.0-or-later`). The English [LICENSE](LICENSE) text is authoritative;
+[LICENSE.zh.txt](LICENSE.zh.txt) is a Chinese reference only.
+
+Version note: releases up to and including `v1.7.0` were published under
+the MIT License. Existing MIT grants for those versions are not revoked.
+The current default branch and future releases use `GPL-3.0-or-later`.
+
+See [NOTICE](NOTICE) for the project notice, [TRADEMARKS.md](TRADEMARKS.md)
+for name and brand guidance, and [RELEASE_VERIFICATION.md](RELEASE_VERIFICATION.md)
+for release hash and provenance verification.
 
 - **Maintainer:** WangYufan（QQ 1471056247）
 - **Repository:** https://github.com/JJosephph/ms-edge-tts-gui

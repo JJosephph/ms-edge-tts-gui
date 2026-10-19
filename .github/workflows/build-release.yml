@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 name: Build Release
 
 on:
@@ -7,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-windows:
@@ -50,6 +54,15 @@ jobs:
           & $iscc "/DMyAppVersion=$env:APP_VERSION" installer\EdgeTTSGui.iss
           Get-ChildItem dist | Select-Object Name, Length
 
+      - name: 生成 SHA256 校验文件
+        shell: pwsh
+        run: ./scripts/generate_checksums.ps1
+
+      - name: 生成构建来源证明
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/SHA256SUMS.txt
+
       - name: 提取当前版本更新说明
         shell: pwsh
         run: |
@@ -72,3 +85,9 @@ jobs:
             dist/EdgeTTSGui/EdgeTTSGui.exe
             dist/EdgeTTSGui-Portable.exe
             dist/EdgeTTSGui-Setup.exe
+            dist/SHA256SUMS.txt
+            LICENSE
+            LICENSE.zh.txt
+            NOTICE
+            TRADEMARKS.md
+            RELEASE_VERIFICATION.md

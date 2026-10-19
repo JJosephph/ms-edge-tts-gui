@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-FileCopyrightText: 2026 WangYufan (QQ 1471056247)
+# SPDX-License-Identifier: GPL-3.0-or-later
 """文件导入与分页：把 txt/md/docx/pdf 转成逐页/逐行旁白结构。
 
 每个 Page = 一条旁白：text 会朗读（可编辑），note 是备注（不朗读）。
