@@ -16,10 +16,30 @@
 <p align="center">
   <a href="#中文说明">中文说明</a> ·
   <a href="#english-guide">English guide</a> ·
+  <a href="#qq-交流群--qq-group">QQ 交流群</a> ·
   <a href="#downloads">Downloads</a> ·
   <a href="#赞赏支持--support-the-author">支持作者</a> ·
   <a href="#network-and-proxy">Network &amp; proxy</a> ·
   <a href="#build-and-release">Build</a>
+</p>
+
+---
+
+## QQ 交流群 / QQ Group
+
+<p align="center">
+  <a href="https://qm.qq.com/q/yUcKqYgfnO"><strong>点击链接加入群聊【Edge TTS 语音合成助手交流群】</strong></a><br>
+  群号：<code>1131492036</code>
+</p>
+
+<p align="center">
+  <a href="https://qm.qq.com/q/yUcKqYgfnO">
+    <img src="assets/qq-group-qrcode.jpg" alt="Edge TTS 语音合成助手 QQ 群二维码，群号 1131492036" width="300">
+  </a>
+</p>
+<p align="center">
+  <sub>扫码或点击链接加入 QQ 群 · 获取更新、反馈问题、交流使用经验<br>
+  Scan the QR code or use the link to join for updates, troubleshooting, and community discussion.</sub>
 </p>
 
 ---
