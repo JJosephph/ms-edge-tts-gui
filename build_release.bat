@@ -26,6 +26,10 @@ if not exist ".venv\Scripts\python.exe" (
 
 ".venv\Scripts\python.exe" -m pip install -r requirements-dev.txt
 
+echo Running tests...
+".venv\Scripts\python.exe" -m unittest discover -s tests -v
+if errorlevel 1 exit /b 1
+
  echo Building application directory...
 ".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "EdgeTTSGui" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 if errorlevel 1 exit /b 1

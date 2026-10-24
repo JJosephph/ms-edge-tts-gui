@@ -75,6 +75,14 @@
 
 **Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（GPL-3.0-or-later，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
+### v1.7.2 更新亮点
+
+- **更新检查更稳**：优先读取 GitHub Release 官方跳转地址，不再让每次启动都依赖受限的 GitHub API；只有发现新版本时才读取 API 更新说明，API 受限时仍可直接打开发布页和下载安装包。
+- **429 限流提示更友好**：连续重试后仍被微软服务端限流时，改用黄色警告弹窗，明确说明这是服务端临时限制，不再像程序崩溃。
+- **发布前自动测试**：GitHub Release 工作流和本地打包脚本都会先运行完整测试，避免未通过测试的版本直接发布。
+- **依赖跟进上游修复**：最低依赖更新为 `edge-tts>=7.3.0`，跟进原项目对 Edge Read Aloud 接口和令牌迁移的正式修复。
+- **批量逻辑修正**：普通模式批量文件中没有可朗读文字的条目不再进入无意义冷却重试。
+
 ### v1.7.1 更新亮点
 
 - **生成等待提示更友好**：长时间没有收到新音频时，不再弹出类似报错的模态窗口；进度栏旁会出现一个非阻塞的 `!` 提示，悬停后可选择「继续等待」或「重试」。不操作时会继续等待，不会自动中断或重开连接。
@@ -111,10 +119,10 @@
 ### 中文界面预览
 
 <p align="center">
-<img src="assets/ui-v161-normal.png" alt="v1.6.1 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
+<img src="assets/ui-v172-normal.png" alt="v1.7.2 主界面：普通模式，顶部可切换普通 / 逐页 / 逐行三种模式" width="900">
 </p>
 <p align="center">
-<sub>v1.6.1 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
+<sub>v1.7.2 主界面 · 普通模式：左侧输入文稿，右侧选择语音、设置句间停顿、SRT 字幕和时间轴；顶部可切换普通 / 逐页 / 逐行三种工作模式。</sub>
 </p>
 
 ### 亮点功能：时间轴 JSON + 试听逐句高亮
@@ -124,16 +132,6 @@
 - **保存即打包 ZIP**：点击「保存下载」时，自动生成一个 ZIP 压缩包，里面同时包含 MP3 和同名 `.timeline.json`——每句话的起止秒数清清楚楚，不用手动配对；
 - **试听实时高亮**：点击「试听」后，正在朗读的句子会在原文中逐句点亮，像 K 歌字幕一样跟着进度走，跟读复习特别方便；
 - **精准且零额外合成**：MP3 与时间轴在同一次请求中生成，时间轴直接使用微软 TTS 返回的句级边界，**不需要再次合成**，纯本地保存、完全免费、无需 API Key。
-
-<p align="center">
-<img src="assets/ui-v161-highlight.png" alt="试听逐句高亮：正在朗读的句子在文章中实时点亮" width="900">
-</p>
-<p align="center">
-  <sub>试听逐句高亮：播放时正在朗读的句子会实时点亮，同时“试听”按钮变成红色「■ 停止播放」。</sub>
-</p>
-<p align="center">
-<img src="assets/ui-v161-help.png" alt="时间轴 JSON 帮助弹窗（含示例与高亮演示）" width="600">
-</p>
 
 `.timeline.json` 内容示例：
 
@@ -195,7 +193,7 @@
 `[分页]` 不会被朗读。没有显式标记时，文本中的空行块也可以作为页面。每页支持备注，备注不会朗读，会写入 `pages.json`。点击「**逐页配音**」后，每页生成一个 MP3，最后可导出 ZIP。
 
 <p align="center">
-<img src="assets/ui-v161-page.png" alt="v1.6.1 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
+<img src="assets/ui-v172-page.png" alt="v1.7.2 逐页模式：按 [分页] 标记或空行分页，每页生成一个音频" width="900">
 </p>
 <p align="center">
   <sub>逐页模式：左上角切换「逐页模式」，导入 txt / md / docx / pdf 后逐页核对文字与备注，再点击「逐页配音」批量生成。</sub>
@@ -214,7 +212,7 @@
 点击「**逐行配音**」后，软件按行顺序合成，完成后保存为 ZIP，包含 `line_001.mp3`、`line_002.mp3` 等音频以及 `lines.json`。打开「查看结果」后，可切换“当前音频 / 全部字幕”，在同一行编辑文字、查看时间轴、试听、拖动进度和重新生成；全部确认后可直接导出最终 ZIP。逐页和逐行模式都提供「**示例文件**」按钮。
 
 <p align="center">
-<img src="assets/ui-v161-line.png" alt="v1.6.1 逐行模式：每个非空行生成一个独立音频" width="900">
+<img src="assets/ui-v172-line.png" alt="v1.7.2 逐行模式：每个非空行生成一个独立音频" width="900">
 </p>
 <p align="center">
   <sub>逐行模式：粘贴文本后点击「按行准备」（或直接导入文件），每个非空行对应一个音频，可逐行翻页核对。</sub>
@@ -231,13 +229,6 @@
 - **当前音频 / 全部字幕**：顶部开关可在“只看当前一条”和“查看全部条目”之间切换，批量结果一目了然。
 - **导出最终 ZIP**：确认无误后点「导出最终 ZIP」，把音频、SRT 字幕和时间轴 JSON 一起打包保存。
 
-<p align="center">
-<img src="assets/ui-v161-result.png" alt="v1.6.1 查看结果：试听、字幕时间轴、拖动进度与逐行重新生成" width="900">
-</p>
-<p align="center">
-  <sub>「查看结果」· 全部字幕视图：编号、字幕文本、时间轴、试听 / 重新生成、可拖动进度条一屏完成校对。</sub>
-</p>
-
 ### 句间停顿与字幕
 
 - 在右侧「**默认句间停顿**」输入毫秒数：支持 `0`，或 `50–10000 ms`。设置值会替换 Edge TTS 原生句间空隙，不改变人声语速。
@@ -247,9 +238,6 @@
 - 开启「**生成 SRT 字幕**」后，每句生成一条字幕；字幕时间会包含句间停顿，和最终 MP3 严格对应。
 - 开启「**时间轴 JSON + 试听高亮**」后，可同时导出 `.timeline.json`；批量 ZIP 会按每页或每行保存对应的 MP3、SRT 和时间轴文件。
 - 逐行模式开启「**行末停顿**」后，字幕区会多出「**填充行末停顿（字幕无空隙）**」选项：勾选后上一行字幕延续到下一行开始、末行覆盖行末延迟，导入剪辑软件不会出现空缺；不勾选则保留真实停顿——无论是否勾选，音频与时间轴 JSON 都不变。
-
-<img src="assets/ui-v161-srt-fill.png" alt="v1.6.1 逐行模式：字幕填充行末停顿选项，勾选后导出的 SRT 时间轴没有空缺" width="900">
-<sub>v1.6.1 逐行模式 ·「填充行末停顿（字幕无空隙）」默认关闭；勾选后导出的 SRT 首尾相接，音频与时间轴 JSON 始终保留真实停顿。</sub>
 
 ```text
 lines_archive.zip
@@ -276,6 +264,8 @@ lines_archive.zip
 
 The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. Normal mode also includes an embedded **Batch Upload** workspace: paste text as before, or drop/select multiple files, configure each row independently, generate all files, and export a ZIP. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page, line, or file batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a non-blocking stall notice help with real-world network conditions.
 
+**v1.7.2 highlights:** Update checks now prefer GitHub's official release redirect instead of consuming the rate-limited API on every launch. Final HTTP 429 notices use a calm yellow warning, release builds run the full test suite first, and the dependency floor now follows `edge-tts>=7.3.0`.
+
 **v1.7.1 highlights:** Long silent waits now use a non-blocking `!` notice beside the progress bar instead of a modal that looks like an error. Hover it to keep waiting or retry; doing nothing keeps the current request alive. Connection drops, rate limits, and temporary service errors retry in the background.
 
 **v1.7.0 highlights:** Normal mode now has an embedded file batch with per-file settings and first-line rules such as `{Abeo|200ms{,.~}|srt}`. Completed items are preserved across retries, completed batches can be exported together or individually as ZIP files, and Unicode output filenames no longer trigger the `failed to decode file (-7)` error.
@@ -283,24 +273,24 @@ The project is designed as a general-purpose open-source tool with three focused
 ## Interface Preview
 
 <p align="center">
-<img src="assets/ui-v161-normal.png" alt="v1.6.1 interface preview" width="900">
+<img src="assets/ui-v172-normal.png" alt="v1.7.2 interface preview" width="900">
 </p>
 
 <p align="center">
-<sub>v1.6.1 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
+<sub>v1.7.2 main window · Normal mode composer with the three work modes on top and sentence pause, SRT, and timeline controls on the right</sub>
 </p>
 
 ## Work Modes
 
 <p align="center">
-<img src="assets/ui-v161-page.png" alt="v1.6.1 Page mode: one audio file per page" width="900">
+<img src="assets/ui-v172-page.png" alt="v1.7.2 Page mode: one audio file per page" width="900">
 </p>
 <p align="center">
   <sub>Page mode · import txt / md / docx / pdf, verify each page and its note, then dub every page into its own MP3.</sub>
 </p>
 
 <p align="center">
-<img src="assets/ui-v161-line.png" alt="v1.6.1 Line mode: one audio file per non-empty line" width="900">
+<img src="assets/ui-v172-line.png" alt="v1.7.2 Line mode: one audio file per non-empty line" width="900">
 </p>
 <p align="center">
   <sub>Line mode · every non-empty line becomes one audio file, ready for narration, explainer videos, and batch subtitles.</sub>
@@ -316,13 +306,6 @@ After generation, click **Review result** on the main window to preview, proof-r
 - **Edit and regenerate** — fix the narration text and regenerate only that row, or regenerate the whole batch;
 - **Current / all items** — the switch at the top toggles between the current item and the full batch list;
 - **Export final ZIP** — one click bundles MP3 files, SRT subtitles, and timeline JSON.
-
-<p align="center">
-<img src="assets/ui-v161-result.png" alt="v1.6.1 Review result window: play, subtitles, timeline, seeking, regenerate" width="900">
-</p>
-<p align="center">
-  <sub>The result viewer in "all items" mode: number, subtitle text, timeline, play / regenerate, and a draggable progress bar.</sub>
-</p>
 
 ## Features
 
@@ -343,7 +326,7 @@ After generation, click **Review result** on the main window to preview, proof-r
 | **Restore defaults** | The voice-deck button resets voice to `en-US-AndrewMultilingualNeural` and rate/volume/pitch to `+0%`/`+0%`/`+0Hz` in one click. |
 | **Recommended female voice** | `zh-CN-XiaoxiaoNeural` is prominently listed as a recommended Chinese female voice. |
 | **Network protection** | Checks Edge TTS service availability and detects proxy environment variables before generation. |
-| **Stall recovery** | If audio stops arriving, the app first retries automatically with backoff (up to 2 silent retries per item) and only then offers **Keep waiting**, **Retry**, or **Cancel** with a network/proxy explanation. |
+| **Stall recovery** | If audio stops arriving, a non-blocking `!` notice appears beside the progress bar with **Keep waiting** and **Retry** actions. Doing nothing keeps the current request alive, and transient connection errors retry in the background. |
 | **Result viewer + subtitles** | A batch review window with per-row Play / Stop, draggable millisecond progress, sentence-level subtitles and timeline, per-row text editing and regeneration, and final ZIP export. |
 | **Bilingual interface** | Toggle the desktop UI between **中文** and **English** at any time. English articles and international voices are fully supported. |
 | **Day / night themes** | Switch between a bright reading-friendly theme and a focused dark workspace. |
@@ -356,16 +339,6 @@ The feature we are most proud of — enable the **Timeline JSON + highlight** to
 - **Save = one ZIP**: clicking **Save Audio** produces a single ZIP that bundles the MP3 with its `.timeline.json` (start/end seconds for every sentence) — nothing to pair up by hand;
 - **Live highlight while playing**: the sentence being read lights up in the article in real time, sentence by sentence — great for shadowing, subtitles and review;
 - **Precise with no extra synthesis**: the MP3 and timeline are produced in the same request, using sentence-boundary metadata returned directly by Microsoft TTS. **No re-rendering** is needed; files are saved locally, free, with no API key.
-
-<p align="center">
-<img src="assets/ui-v161-highlight.png" alt="Live sentence highlight while playing, with the red Stop button" width="900">
-</p>
-<p align="center">
-  <sub>Live sentence highlight: the sentence being read lights up in the article, and the Play button becomes a red Stop button.</sub>
-</p>
-<p align="center">
-<img src="assets/ui-v161-help.png" alt="Timeline JSON help dialog (example + highlight demo)" width="600">
-</p>
 
 Example `.timeline.json`:
 

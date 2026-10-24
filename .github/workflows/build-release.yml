@@ -30,6 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: 运行测试
+        run: python -m unittest discover -s tests -v
+
       - name: 生成版本信息
         shell: bash
         run: |

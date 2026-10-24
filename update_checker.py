@@ -13,6 +13,10 @@ from urllib.request import Request, urlopen
 LATEST_RELEASE_API = (
     "https://api.github.com/repos/JJosephph/ms-edge-tts-gui/releases/latest"
 )
+LATEST_RELEASE_PAGE = (
+    "https://github.com/JJosephph/ms-edge-tts-gui/releases/latest"
+)
+REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 DEFAULT_TIMEOUT = 8.0
 DOWNLOAD_ASSET_NAMES = ("EdgeTTSGui-Setup.exe", "EdgeTTSGui-Portable.exe")
 
@@ -88,37 +92,109 @@ def release_from_payload(payload: dict) -> ReleaseInfo:
     )
 
 
+def release_from_redirect_url(final_url: str) -> ReleaseInfo:
+    """Build release metadata from GitHub's /releases/latest redirect."""
+    match = re.search(r"/releases/tag/([^/?#]+)", str(final_url or ""))
+    if not match:
+        raise ValueError("GitHub Release 跳转地址缺少版本标签。")
+    tag_name = match.group(1).strip()
+    version = normalize_version(tag_name)
+    if not version:
+        raise ValueError("GitHub Release 跳转地址缺少有效版本号。")
+    return ReleaseInfo(
+        version=version,
+        tag_name=tag_name,
+        name=tag_name,
+        notes="",
+        page_url=f"{REPOSITORY_URL}/releases/tag/{tag_name}",
+        download_url=(
+            f"{REPOSITORY_URL}/releases/download/{tag_name}/"
+            f"{DOWNLOAD_ASSET_NAMES[0]}"
+        ),
+        published_at="",
+    )
+
+
+def _request_headers(current_version: str, accept: str) -> dict[str, str]:
+    return {
+        "Accept": accept,
+        "User-Agent": f"EdgeTTSGui/{current_version}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _fetch_latest_from_redirect(current_version: str, timeout: float) -> ReleaseInfo:
+    request = Request(
+        LATEST_RELEASE_PAGE,
+        headers=_request_headers(current_version, "text/html"),
+    )
+    with urlopen(request, timeout=timeout) as response:
+        final_url = getattr(response, "geturl", lambda: "")()
+    return release_from_redirect_url(final_url)
+
+
+def _fetch_latest_from_api(current_version: str, timeout: float) -> ReleaseInfo:
+    request = Request(
+        LATEST_RELEASE_API,
+        headers=_request_headers(
+            current_version,
+            "application/vnd.github+json",
+        ),
+    )
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return release_from_payload(payload)
+
+
+def _check_error_message(exc: BaseException) -> str:
+    status = getattr(exc, "code", None)
+    if status == 403:
+        return "GitHub 更新检查暂时受限（403），请稍后重试。"
+    if status == 404:
+        return "GitHub 上还没有可用的正式版发布。"
+    return str(exc).strip()[:300] or exc.__class__.__name__
+
+
 def check_for_updates(
     current_version: str, timeout: float = DEFAULT_TIMEOUT
 ) -> UpdateCheckResult:
-    request = Request(
-        LATEST_RELEASE_API,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": f"EdgeTTSGui/{current_version}",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
+    """Check the latest release without depending on the rate-limited API."""
     try:
-        with urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        latest = release_from_payload(payload)
+        latest = _fetch_latest_from_redirect(current_version, timeout)
+    except Exception as redirect_exc:  # noqa: BLE001
+        try:
+            latest = _fetch_latest_from_api(current_version, timeout)
+        except Exception as api_exc:  # noqa: BLE001
+            return UpdateCheckResult(
+                current_version=current_version,
+                latest=None,
+                update_available=False,
+                error=_check_error_message(api_exc or redirect_exc),
+            )
         return UpdateCheckResult(
             current_version=current_version,
             latest=latest,
             update_available=is_newer_version(latest.version, current_version),
         )
-    except Exception as exc:  # noqa: BLE001 - report a user-facing check failure
-        status = getattr(exc, "code", None)
-        if status == 403:
-            message = "GitHub 更新检查暂时受限（403），请稍后重试。"
-        elif status == 404:
-            message = "GitHub 上还没有可用的正式版发布。"
-        else:
-            message = str(exc).strip()[:300] or exc.__class__.__name__
+
+    update_available = is_newer_version(latest.version, current_version)
+    if not update_available:
         return UpdateCheckResult(
             current_version=current_version,
-            latest=None,
+            latest=latest,
             update_available=False,
-            error=message,
         )
+
+    # The redirect is enough to detect the version. Try the API only when a
+    # new release exists so routine checks do not consume GitHub's quota.
+    try:
+        api_latest = _fetch_latest_from_api(current_version, timeout)
+        if is_newer_version(api_latest.version, current_version):
+            latest = api_latest
+    except Exception:  # noqa: BLE001 - redirect metadata is already sufficient
+        pass
+    return UpdateCheckResult(
+        current_version=current_version,
+        latest=latest,
+        update_available=True,
+    )

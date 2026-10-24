@@ -71,7 +71,7 @@ from page_import import (
 )
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -199,6 +199,7 @@ class App(ctk.CTk):
         self._stall_controller: StallController | None = None
         self._update_check_running = False
         self._update_dialog_open = False
+        self._rate_limit_dialog_open = False
         self._cancel_event = threading.Event()
         self._busy = False
         self._settings = self._load_settings()
@@ -350,6 +351,8 @@ class App(ctk.CTk):
         "update_later": {"zh": "稍后", "en": "Later"},
         "update_up_to_date": {"zh": "当前已是最新版本 v{version}。", "en": "You are running the latest version, v{version}."},
         "update_empty_notes": {"zh": "此版本未提供更新说明，请打开发布页查看。", "en": "No release notes were provided. Open the release page for details."},
+        "rate_limit_title": {"zh": "微软语音服务繁忙", "en": "Microsoft Speech Service Is Busy"},
+        "rate_limit_ack": {"zh": "知道了", "en": "Got it"},
         "repo": {"zh": "GitHub 仓库 ↗", "en": "GitHub Repo ↗"},
         "star": {"zh": "⭐ 去 GitHub 点 Star", "en": "⭐ Star on GitHub"},
         "developer": {"zh": "开发者", "en": "Developer"},
@@ -2237,11 +2240,79 @@ class App(ctk.CTk):
             self._progress.set(0)
             self._status_label.configure(text=self._t("failed"), text_color="#f7768e")
             self.log(f"[任务] 失败：{result.get('error', '未知错误')}")
-            messagebox.showerror(
-                APP_NAME,
-                "生成失败：\n\n"
-                + result.get("error", "未知错误"),
-            )
+            self._show_generation_failure(result)
+
+    def _show_generation_failure(self, result: dict) -> None:
+        message = result.get("error", "未知错误")
+        if result.get("http_status") == 429:
+            self._show_rate_limit_notice(message)
+            return
+        messagebox.showerror(APP_NAME, f"生成失败：\n\n{message}")
+
+    def _show_rate_limit_notice(self, message: str) -> None:
+        """Show a calm final notice after automatic 429 retries are exhausted."""
+        if self._rate_limit_dialog_open:
+            return
+        self._rate_limit_dialog_open = True
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(self._t("rate_limit_title"))
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        width, height = 520, 280
+
+        def close_dialog():
+            self._rate_limit_dialog_open = False
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=24, pady=22)
+
+        icon = ctk.CTkLabel(
+            content,
+            text="!",
+            width=48,
+            height=48,
+            corner_radius=24,
+            fg_color=self._c("warning"),
+            text_color="#17233A",
+            font=self._font(size=26, weight="bold"),
+        )
+        icon.pack(side="left", anchor="n", padx=(0, 18))
+
+        body = ctk.CTkFrame(content, fg_color="transparent")
+        body.pack(side="left", fill="both", expand=True)
+        ctk.CTkLabel(
+            body,
+            text=self._t("rate_limit_title"),
+            font=self._font(size=18, weight="bold"),
+            text_color=self._c("text"),
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            body,
+            text=message,
+            wraplength=380,
+            justify="left",
+            font=self._font(size=13),
+            text_color=self._c("muted"),
+        ).pack(anchor="w", pady=(10, 18))
+        ctk.CTkButton(
+            body,
+            text=self._t("rate_limit_ack"),
+            width=96,
+            fg_color=self._c("primary"),
+            hover_color=self._c("primary_hover"),
+            text_color="#FFFFFF",
+            command=close_dialog,
+        ).pack(anchor="e")
+
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + max(0, (self.winfo_width() - width) // 2)
+        y = self.winfo_rooty() + max(0, (self.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.after(100, dialog.lift)
 
     # ============================================================ 按钮动作
 
@@ -3465,7 +3536,7 @@ class App(ctk.CTk):
                     "error": message,
                     "display_name": display_name,
                 })
-                return False
+                return True
             controller = self._make_controller()
             engine = TTSEngine(
                 on_log=lambda message: self._ui_q.put(("log", f"[{display_name}] {message}")),
@@ -4250,7 +4321,7 @@ class App(ctk.CTk):
                 item.status = "failed"
                 item.error = result.get("error", "")
                 self._refresh_file_batch_tree()
-                messagebox.showerror(APP_NAME, f"生成失败：{result.get('error', '未知错误')}")
+                self._show_generation_failure(result)
             return
         entry = self._generated_pages.get(page)
         if result.get("status") == "done" and entry:
@@ -4263,7 +4334,7 @@ class App(ctk.CTk):
             if self._result_preview_refresh:
                 self._result_preview_refresh()
         elif result.get("status") != "done":
-            messagebox.showerror(APP_NAME, f"生成失败：{result.get('error', '未知错误')}")
+            self._show_generation_failure(result)
 
     def _on_save(self):
         if self._file_batch_active:
