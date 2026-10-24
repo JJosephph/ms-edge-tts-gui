@@ -71,7 +71,7 @@ from page_import import (
 )
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
@@ -196,7 +196,6 @@ class App(ctk.CTk):
         self.minsize(min(1000, win_w), min(620, win_h))
 
         self._ui_q: "queue.Queue" = queue.Queue()
-        self._stall_req_q: "queue.Queue" = queue.Queue()
         self._stall_controller: StallController | None = None
         self._update_check_running = False
         self._update_dialog_open = False
@@ -319,6 +318,10 @@ class App(ctk.CTk):
         self._srt_fill_hint = None
         self._play_button_active = False
         self._play_poll_after = None
+        self._stall_indicator = None
+        self._stall_popover = None
+        self._stall_popover_label = None
+        self._stall_popover_hide_after = None
 
         self._build_ui()
         self._bind_events()
@@ -437,6 +440,12 @@ class App(ctk.CTk):
         "volume": {"zh": "音量", "en": "Volume"},
         "pitch": {"zh": "音调", "en": "Pitch"},
         "ready": {"zh": "就绪", "en": "Ready"},
+        "stall_message": {
+            "zh": "好像半天都没动，要不要重试呀？也可以继续等待，不操作会一直等。",
+            "en": "It has been quiet for a while. Want to retry, or keep waiting? We will keep waiting if you do nothing.",
+        },
+        "stall_continue": {"zh": "继续等待", "en": "Keep waiting"},
+        "stall_retry": {"zh": "重试", "en": "Retry"},
         "generate": {"zh": "生成音频", "en": "Generate Audio"},
         "play": {"zh": "▶ 试听", "en": "▶ Play"},
         "play_stop": {"zh": "■ 停止播放", "en": "■ Stop"},
@@ -782,6 +791,7 @@ class App(ctk.CTk):
         return THEMES[self._theme][key]
 
     def _rebuild_ui(self):
+        self._cancel_stall_popover_hide()
         text = self._textbox.get("1.0", "end-1c")
         if self._workflow_mode == "normal":
             if not self._file_batch_active:
@@ -853,6 +863,55 @@ class App(ctk.CTk):
         self._build_workspace()
         self._build_log()
         self._build_footer()
+        self._build_stall_popover()
+
+    def _build_stall_popover(self):
+        self._stall_popover = ctk.CTkFrame(
+            self,
+            corner_radius=12,
+            fg_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("warning"),
+        )
+        self._stall_popover_label = ctk.CTkLabel(
+            self._stall_popover,
+            text=self._t("stall_message"),
+            wraplength=310,
+            justify="left",
+            text_color=self._c("text"),
+            font=self._font(size=12),
+        )
+        self._stall_popover_label.pack(padx=14, pady=(12, 8), anchor="w")
+        row = ctk.CTkFrame(self._stall_popover, fg_color="transparent")
+        row.pack(padx=12, pady=(0, 12), anchor="e")
+        ctk.CTkButton(
+            row,
+            text=self._t("stall_continue"),
+            width=88,
+            height=28,
+            font=self._font(size=12, weight="bold"),
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("border"),
+            text_color=self._c("text"),
+            command=self._on_stall_continue,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            row,
+            text=self._t("stall_retry"),
+            width=72,
+            height=28,
+            font=self._font(size=12, weight="bold"),
+            fg_color=self._c("primary"),
+            hover_color=self._c("primary_hover"),
+            text_color="#FFFFFF",
+            command=self._on_stall_retry,
+        ).pack(side="left")
+        self._stall_popover.bind("<Enter>", lambda _event: self._cancel_stall_popover_hide())
+        self._stall_popover.bind("<Leave>", lambda _event: self._schedule_stall_popover_hide())
+        for widget in (self._stall_popover_label, row, *row.winfo_children()):
+            widget.bind("<Enter>", lambda _event: self._cancel_stall_popover_hide())
+            widget.bind("<Leave>", lambda _event: self._schedule_stall_popover_hide())
+        self._stall_popover.place_forget()
 
     def _build_header(self):
         header = ctk.CTkFrame(self, corner_radius=18, fg_color=self._c("surface"), border_width=1, border_color=self._c("border"))
@@ -1340,11 +1399,27 @@ class App(ctk.CTk):
 
         status_row = ctk.CTkFrame(deck_footer, fg_color="transparent")
         status_row.grid(row=1, column=0, sticky="ew", padx=18, pady=(8, 3))
-        status_row.grid_columnconfigure(0, weight=1)
+        status_row.grid_columnconfigure(1, weight=1)
+        self._stall_indicator = ctk.CTkButton(
+            status_row,
+            text="!",
+            width=22,
+            height=22,
+            corner_radius=11,
+            font=self._font(size=13, weight="bold"),
+            fg_color=self._c("warning"),
+            hover_color=self._c("card_raised"),
+            text_color="#17233A",
+            command=self._toggle_stall_popover,
+        )
+        self._stall_indicator.grid(row=0, column=0, padx=(0, 6))
+        self._stall_indicator.grid_remove()
+        self._stall_indicator.bind("<Enter>", lambda _event: self._show_stall_popover())
+        self._stall_indicator.bind("<Leave>", lambda _event: self._schedule_stall_popover_hide())
         self._status_label = ctk.CTkLabel(status_row, text=self._t("ready"), text_color=self._c("success"), font=self._font(size=12, weight="bold"))
-        self._status_label.grid(row=0, column=0, sticky="w")
+        self._status_label.grid(row=0, column=1, sticky="w")
         self._btn_stop = ctk.CTkButton(status_row, text=self._t("stop"), command=self._on_stop, width=60, height=22, font=self._font(size=11), fg_color="transparent", hover_color=self._c("card_raised"), text_color=self._c("danger"), state="disabled")
-        self._btn_stop.grid(row=0, column=1, sticky="e")
+        self._btn_stop.grid(row=0, column=2, sticky="e")
         self._progress = ctk.CTkProgressBar(deck_footer, height=8, mode="determinate", progress_color=self._c("primary"), fg_color=self._c("border"))
         self._progress.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 5))
         self._progress.set(0)
@@ -1473,16 +1548,6 @@ class App(ctk.CTk):
         except queue.Empty:
             pass
 
-        # 处理“卡住”询问
-        try:
-            while True:
-                msg = self._stall_req_q.get_nowait()
-                decision = self._show_stall_dialog(msg)
-                if self._stall_controller is not None:
-                    self._stall_controller.decide(decision)
-        except queue.Empty:
-            pass
-
         self.after(150, self._poll_ui)
 
     def _handle_ui_message(self, item):
@@ -1540,6 +1605,10 @@ class App(ctk.CTk):
             self._on_batch_done(item[1])
         elif kind == "result_row_done":
             self._on_result_row_done(item[1], item[2])
+        elif kind == "stall_clear":
+            self._hide_stall_notice()
+        elif kind == "stall_show":
+            self._show_stall_notice(item[1])
 
     # ============================================================ 网络
 
@@ -2062,8 +2131,11 @@ class App(ctk.CTk):
     # ============================================================ 生成任务
 
     def _make_controller(self) -> StallController:
-        self._stall_req_q = queue.Queue()
-        self._stall_controller = StallController(self._stall_req_q.put)
+        self._ui_q.put(("stall_clear", None))
+        self._stall_controller = StallController(
+            lambda message: self._ui_q.put(("stall_show", message)),
+            lambda: self._ui_q.put(("stall_clear", None)),
+        )
         return self._stall_controller
 
     def _build_cfg(self) -> TTSConfig:
@@ -2123,6 +2195,7 @@ class App(ctk.CTk):
         self._ui_q.put(("task_done", task.mode, result))
 
     def _on_task_done(self, mode, result):
+        self._hide_stall_notice()
         self._busy = False
         self._set_busy_ui(False)
         self._generated_timeline = None
@@ -3234,6 +3307,7 @@ class App(ctk.CTk):
         self._ui_q.put(("batch_done", {"results": results, "canceled": canceled, "mode": batch_mode}))
 
     def _on_batch_done(self, payload):
+        self._hide_stall_notice()
         if payload.get("mode") == "file":
             self._on_file_batch_done(payload)
             return
@@ -5348,6 +5422,9 @@ class App(ctk.CTk):
             (r"^\[网络\] 不可达，检测到代理 (.*)，可能是网络不通或代理设置不正确。$", r"[Network] Unreachable; proxy detected: \1. Check the connection or proxy configuration."),
             (r"^\[网络\] 不可达（(.*)）。生成可能很慢或失败，建议检查网络后重试。$", r"[Network] Unreachable (\1). Synthesis may be slow or fail; check your network and retry."),
             (r"^\[警告\] 生成失败：(.*)（可能是网络不通或代理设置不正确）$", r"[Warning] Synthesis failed: \1 (network or proxy may be unavailable or misconfigured)"),
+            (r"^\[提示\] 长时间没有收到新的音频数据，已显示重试提示；当前仍会继续等待。$", r"[Info] No new audio data for a while. A retry option is available; synthesis will keep waiting."),
+            (r"^\[提示\] 等待期间连接中断，正在自动重试…（(.*)）$", r"[Info] The connection dropped while waiting; auto-retrying… (\1)"),
+            (r"^\[提示\] (.*)，继续自动重试…$", r"[Info] \1; continuing automatic retries…"),
             (r"^\[提示\] 长时间没有收到新的音频数据，正在自动重试（(\d+)/(\d+)）…$", r"[Info] No new audio data for a while; auto-retrying (\1/\2)…"),
             (r"^\[提示\] 等待期间连接中断，正在自动重试（(\d+)/(\d+)）…$", r"[Info] The connection dropped while waiting; auto-retrying (\1/\2)…"),
             (r"^\[提示\] (.*)，正在自动重试（(\d+)/(\d+)）…$", r"[Info] \1; auto-retrying (\2/\3)…"),
@@ -5379,77 +5456,89 @@ class App(ctk.CTk):
                 return localized
         return message
 
-    def _localized_stall_message(self, message: str) -> str:
-        if self._language != "en":
-            return message
-        if "长时间没有收到新的音频数据" in message:
-            return (
-                "No new audio data has arrived for a while. Your network connection "
-                "or proxy may be unavailable or misconfigured. Would you like to retry?"
+    def _show_stall_notice(self, _message: str) -> None:
+        if self._stall_indicator is None:
+            return
+        self._stall_indicator.grid()
+        if self._stall_popover_label is not None:
+            self._stall_popover_label.configure(text=self._t("stall_message"))
+
+    def _hide_stall_notice(self) -> None:
+        self._cancel_stall_popover_hide()
+        if self._stall_popover is not None:
+            self._stall_popover.place_forget()
+        if self._stall_indicator is not None:
+            self._stall_indicator.grid_remove()
+
+    def _show_stall_popover(self) -> None:
+        if (
+            self._stall_indicator is None
+            or self._stall_popover is None
+            or not self._stall_indicator.winfo_ismapped()
+        ):
+            return
+        self._cancel_stall_popover_hide()
+        self._stall_popover.update_idletasks()
+        width = max(260, self._stall_popover.winfo_reqwidth())
+        height = max(80, self._stall_popover.winfo_reqheight())
+        x = self._stall_indicator.winfo_rootx() - self.winfo_rootx()
+        y = (
+            self._stall_indicator.winfo_rooty()
+            - self.winfo_rooty()
+            - height
+            - 8
+        )
+        if y < 8:
+            y = (
+                self._stall_indicator.winfo_rooty()
+                - self.winfo_rooty()
+                + self._stall_indicator.winfo_height()
+                + 8
             )
-        if "网络不通或代理设置不正确" in message:
-            return "Your network connection or proxy may be unavailable or misconfigured. Would you like to retry?"
-        return message
+        max_x = max(8, self.winfo_width() - width - 8)
+        x = min(max(8, x), max_x)
+        self._stall_popover.place(x=x, y=y)
+        self._stall_popover.lift()
 
-    def _show_stall_dialog(self, message: str) -> str:
-        is_english = self._language == "en"
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("⚠ Generation appears stalled" if is_english else "⚠ 生成似乎卡住了")
-        dialog.geometry("540x300")
-        dialog.resizable(False, False)
-        dialog.transient(self)
-        dialog.grab_set()
-        dialog.after(100, dialog.lift)
+    def _toggle_stall_popover(self) -> None:
+        if self._stall_popover is not None and self._stall_popover.winfo_ismapped():
+            self._schedule_stall_popover_hide()
+        else:
+            self._show_stall_popover()
 
-        ctk.CTkLabel(
-            dialog,
-            text="Generation appears stalled" if is_english else "生成似乎卡住了",
-            font=self._font(size=18, weight="bold"),
-            text_color="#e0af68",
-        ).pack(pady=(22, 6))
+    def _schedule_stall_popover_hide(self) -> None:
+        if self._stall_popover_hide_after is not None:
+            try:
+                self.after_cancel(self._stall_popover_hide_after)
+            except tk.TclError:
+                pass
+        self._stall_popover_hide_after = self.after(
+            250, self._hide_stall_popover_only
+        )
 
-        ctk.CTkLabel(
-            dialog,
-            text=self._localized_stall_message(message),
-            wraplength=470,
-            justify="left",
-            text_color="#c0caf5",
-        ).pack(padx=30, pady=(0, 14))
+    def _cancel_stall_popover_hide(self) -> None:
+        if self._stall_popover_hide_after is None:
+            return
+        try:
+            self.after_cancel(self._stall_popover_hide_after)
+        except tk.TclError:
+            pass
+        self._stall_popover_hide_after = None
 
-        result = {"value": "cancel"}
-        dont_remind = tk.BooleanVar(value=False)
+    def _hide_stall_popover_only(self) -> None:
+        self._stall_popover_hide_after = None
+        if self._stall_popover is not None:
+            self._stall_popover.place_forget()
 
-        def choose(value):
-            if value == "continue" and dont_remind.get():
-                value = "continue_silent"
-            result["value"] = value
-            dialog.destroy()
+    def _on_stall_continue(self) -> None:
+        self._hide_stall_notice()
+        if self._stall_controller is not None:
+            self._stall_controller.decide("continue")
 
-        ctk.CTkCheckBox(
-            dialog,
-            text="Don't remind me again (this task)" if is_english else "不再提醒（本次任务）",
-            variable=dont_remind,
-            font=self._font(size=12),
-            text_color="#c0caf5",
-            border_color="#52688f",
-            hover_color="#263B5C",
-            fg_color="#5A8CFF",
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
-        ).pack(pady=(0, 12))
-
-        row = ctk.CTkFrame(dialog, fg_color="transparent")
-        row.pack(pady=(6, 20))
-        ctk.CTkButton(row, text="Keep waiting" if is_english else "继续等待", width=120, command=lambda: choose("continue")).pack(side="left", padx=6)
-        ctk.CTkButton(row, text="Retry" if is_english else "重试", width=120, command=lambda: choose("retry")).pack(side="left", padx=6)
-        ctk.CTkButton(
-            row, text="Cancel" if is_english else "取消", width=120, fg_color="#f7768e", hover_color="#d9556d",
-            command=lambda: choose("cancel"),
-        ).pack(side="left", padx=6)
-
-        dialog.wait_window()
-        return result["value"]
+    def _on_stall_retry(self) -> None:
+        self._hide_stall_notice()
+        if self._stall_controller is not None:
+            self._stall_controller.decide("retry")
 
     def _maybe_open_folder(self, path):
         is_english = self._language == "en"
@@ -5523,6 +5612,8 @@ class App(ctk.CTk):
         self._update_generated_buttons()
 
     def _set_busy_ui(self, busy: bool):
+        if not busy:
+            self._hide_stall_notice()
         self._btn_generate.configure(state="disabled" if busy else "normal")
         self._btn_stop.configure(state="normal" if busy else "disabled")
         if self._mode_selector is not None:

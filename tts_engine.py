@@ -6,8 +6,8 @@
 设计要点
 --------
 1. 生成前可选网络探测（api.msedgeservices.com 合成 WebSocket），识别离线 / 代理异常。
-2. 流式接收音频分片，若超过 STALL_TIMEOUT 没有新分片，判定为“卡住”，
-   通过 StallController 询问界面：重试 / 取消 / 继续等待。
+2. 流式接收音频分片，若超过 STALL_TIMEOUT 没有新分片，判定为“暂时无响应”，
+   通过 StallController 通知界面显示非阻塞提示：重试 / 继续等待。
 3. 支持重试与用户取消；错误分类后给出网络 / 代理提示。
 """
 
@@ -31,13 +31,11 @@ from edge_tts.drm import DRM
 # ---------------------------------------------------------------- 常量
 STALL_TIMEOUT = 120            # 连续多少秒没有新音频分片 -> 判定卡住
 STALL_FIRST_AUDIO_TIMEOUT = 60  # 还没收到任何数据时的等待上限（限流通常表现为连上后没数据）
-STALL_WAIT_GRACE = 600         # 用户“继续等待”后，再次提醒前的更长等待时间（避免反复弹窗）
-STALL_SILENT_POLL = 5          # “不再提醒”后，检查取消操作的间隔（秒）
-STALL_DECISION_TIMEOUT = 300   # 卡住后等待用户决定的最长时间（秒）
+STALL_SILENT_POLL = 1          # 已显示等待提示后，检查重试 / 取消操作的间隔（秒）
 CONNECT_TIMEOUT = 10          # edge-tts 建连超时
 RECEIVE_TIMEOUT = 1800        # edge-tts 单次接收超时（兜底，不能抢先于界面提示）
 PROBE_TIMEOUT = 6             # 网络探测超时
-STALL_AUTO_RETRIES = 2        # 卡住后先静默自动重试几次，之后才弹窗询问
+STALL_AUTO_RETRIES = 2        # 连接异常时先静默自动重试几次，再交给任务级重试
 MAX_RETRIES = 4               # 最大生成重试次数
 RETRY_BASE_DELAY = 3.0        # 首次自动重试前等待（秒）
 RETRY_MAX_DELAY = 15.0        # 自动重试等待上限（秒）
@@ -940,26 +938,56 @@ def list_tts_voices(proxy: Optional[str] = None) -> list:
 
 
 class StallController:
-    """工作线程 <-> 界面线程 之间的“卡住”问答桥。
+    """工作线程 <-> 界面线程 之间的“暂时无响应”提示桥。
 
-    - ask() 由工作线程调用：发请求给界面，阻塞等待用户决定。
+    - notify() 由工作线程调用：通知界面显示非阻塞提示，不等待结果。
+    - poll() 由工作线程轮询：读取用户点击的“重试 / 继续等待”。
+    - clear() 由工作线程调用：数据恢复后收起提示。
     - decide() 由界面线程调用：把用户选择回传给工作线程。
     """
 
-    def __init__(self, request_callback: Callable[[str], None]):
+    def __init__(
+        self,
+        request_callback: Callable[[str], None],
+        clear_callback: Optional[Callable[[], None]] = None,
+    ):
         self._request_callback = request_callback
+        self._clear_callback = clear_callback
         self._responses: "queue.Queue[str]" = queue.Queue()
+        self._lock = threading.Lock()
+        self._notice_visible = False
 
-    def ask(self, message: str) -> str:
-        """返回 'retry' | 'cancel' | 'continue'。"""
+    def notify(self, message: str) -> None:
+        """Show one non-blocking notice until data resumes or the user decides."""
+        with self._lock:
+            if self._notice_visible:
+                return
+            self._notice_visible = True
         try:
             self._request_callback(message)
         except Exception:
-            return "cancel"
+            with self._lock:
+                self._notice_visible = False
+
+    def poll(self) -> Optional[str]:
+        """Return a pending user decision without blocking the worker thread."""
         try:
-            return self._responses.get(timeout=STALL_DECISION_TIMEOUT)
+            return self._responses.get_nowait()
         except queue.Empty:
-            return "cancel"
+            return None
+
+    def clear(self) -> None:
+        """Hide the notice after audio data resumes."""
+        with self._lock:
+            if not self._notice_visible:
+                return
+            self._notice_visible = False
+        if self._clear_callback is None:
+            return
+        try:
+            self._clear_callback()
+        except Exception:
+            pass
 
     def decide(self, decision: str) -> None:
         self._responses.put(decision)
@@ -1000,7 +1028,6 @@ class TTSEngine:
         self.timeline: Optional[dict] = None
         self.error_message = ""
         self._last_error_status: Optional[int] = None
-        self._suppress_stall_prompts = False
         self._auto_stall_retries = 0
 
     # ---------------- 对外入口 ----------------
@@ -1144,8 +1171,8 @@ class TTSEngine:
         try:
             iterator = self._iter_synthesis_chunks(spoken_text, cfg, needs_word_boundary)
             next_chunk = None
-            wait_deadline = None
-            silent_waiting = False
+            waiting_after_notice = False
+            stall_notice_active = False
             received_any = False
             with open(temp_path, "wb") as audio_file:
                 while True:
@@ -1153,12 +1180,25 @@ class TTSEngine:
                         if next_chunk is not None:
                             next_chunk.cancel()
                         raise UserCanceled()
+                    decision = self._poll_stall_decision()
+                    if decision == "retry" and (
+                        stall_notice_active or waiting_after_notice
+                    ):
+                        if next_chunk is not None:
+                            next_chunk.cancel()
+                        self._clear_stall_notice()
+                        self._safe_unlink(temp_path)
+                        return "retry"
+                    if decision in ("continue", "continue_silent") and (
+                        stall_notice_active or waiting_after_notice
+                    ):
+                        self._clear_stall_notice()
+                        stall_notice_active = False
+                        waiting_after_notice = True
                     if next_chunk is None:
                         next_chunk = asyncio.ensure_future(anext(iterator))
-                    if silent_waiting:
+                    if waiting_after_notice:
                         wait_window = STALL_SILENT_POLL
-                    elif wait_deadline is not None:
-                        wait_window = max(0.0, wait_deadline - time.perf_counter())
                     else:
                         # 一个字都还没收到时更快判定卡住：限流通常表现为
                         # 连接建立后长时间没有任何数据。
@@ -1188,65 +1228,37 @@ class TTSEngine:
                                     f"（{SERVICE_REJECTION_MESSAGE}）"
                                 )
                                 return "error"
-                            if silent_waiting:
+                            if waiting_after_notice:
                                 self.on_log(
-                                    f"[警告] 等待期间连接中断：{exc}；已启用不再提醒，正在自动重试。"
+                                    f"[提示] 等待期间连接中断，正在自动重试…（{exc}）"
                                 )
+                                self._clear_stall_notice()
                                 return "retry"
-                            if wait_deadline is not None:
-                                if self._consume_auto_stall_retry(
-                                    "等待期间连接中断"
-                                ):
-                                    next_chunk = None
-                                    self._safe_unlink(temp_path)
-                                    return "retry"
-                                await self._wait_with_cancel(
-                                    max(0.0, wait_deadline - time.perf_counter())
-                                )
-                                decision = await self._ask_stall(
-                                    "生成等待期间连接中断。"
-                                    "可能是网络波动，也可能是服务端临时限流。要重试吗？"
-                                )
-                                if decision == "cancel":
-                                    return "cancel"
-                                if decision == "continue_silent":
-                                    self._suppress_stall_prompts = True
+                            if self._consume_auto_stall_retry("生成连接中断"):
+                                next_chunk = None
                                 self._safe_unlink(temp_path)
                                 return "retry"
                             raise
                         next_chunk = None
-                        wait_deadline = None
-                        silent_waiting = False
+                        waiting_after_notice = False
+                        if stall_notice_active:
+                            self._clear_stall_notice()
+                            stall_notice_active = False
                         received_any = True
                     else:
                         # 超时仍未收到新数据
-                        if silent_waiting:
-                            # 用户已选择“不再提醒”：静默等待，同时保留取消响应。
+                        if waiting_after_notice:
+                            # 已提示但用户未操作：继续等待，不自动重连。
                             continue
-                        if self._consume_auto_stall_retry(
-                            "长时间没有收到新的音频数据"
-                        ):
-                            next_chunk.cancel()
-                            self._safe_unlink(temp_path)
-                            return "retry"
-                        decision = await self._ask_stall(
-                            "生成似乎卡住了：自动重试后仍长时间没有收到新的音频数据。"
-                            "可能是网络波动，也可能是服务端临时限流。要重试吗？"
+                        self.on_log(
+                            "[提示] 长时间没有收到新的音频数据，"
+                            "已显示重试提示；当前仍会继续等待。"
                         )
-                        if decision == "cancel":
-                            next_chunk.cancel()
-                            raise UserCanceled()
-                        if decision == "retry":
-                            next_chunk.cancel()
-                            self._safe_unlink(temp_path)
-                            return "retry"
-                        if decision == "continue_silent":
-                            self._suppress_stall_prompts = True
-                            silent_waiting = True
-                            wait_deadline = None
-                        else:
-                            # 从用户点击“继续等待”的时刻重新计时。
-                            wait_deadline = time.perf_counter() + STALL_WAIT_GRACE
+                        self._notify_stall(
+                            "好像半天都没动，要不要重试呀？也可以继续等待。"
+                        )
+                        stall_notice_active = True
+                        waiting_after_notice = True
                         continue
 
                     chunk_type = chunk.get("type")
@@ -1339,7 +1351,7 @@ class TTSEngine:
             self.error_message = str(exc)
             self.on_log(f"[警告] {self.error_message}")
             return "error"
-        except Exception as exc:  # noqa: BLE001 - 统一兜底并让用户决定
+        except Exception as exc:  # noqa: BLE001 - 统一兜底并交给任务级重试
             self._safe_unlink(temp_path)
             self._last_error_status = http_status_from_exception(exc)
             if self._is_service_rejection(exc):
@@ -1355,25 +1367,18 @@ class TTSEngine:
                 # 限流 / 服务端临时故障属于“等一会儿再来”，静默重试比弹窗更合适。
                 self.on_log(f"[提示] {hint}，正在自动重试…")
                 return "retry"
-            if self._suppress_stall_prompts:
-                self.on_log("[提示] 已启用不再提醒，正在自动重试。")
-                return "retry"
             if self._consume_auto_stall_retry(hint):
                 return "retry"
-            decision = await self._ask_stall(f"{hint} 是否重试？")
-            if decision == "cancel":
-                return "cancel"
-            if decision == "continue_silent":
-                self._suppress_stall_prompts = True
+            self.on_log(f"[提示] {hint}，继续自动重试…")
             return "retry"
 
     # ---------------- 工具 ----------------
 
     def _consume_auto_stall_retry(self, reason: str) -> bool:
-        """卡住 / 中断后先静默自动重试几次，用完额度才弹窗询问。
+        """连接异常后先静默自动重试几次。
 
         用户实测批量生成时服务端会短时限流：重试基本都能成功，
-        因此自动重试比每次都弹窗更省事。
+        因此这里不打断用户，后续交给任务级重试上限兜底。
         """
         if self._auto_stall_retries >= STALL_AUTO_RETRIES:
             return False
@@ -1384,14 +1389,30 @@ class TTSEngine:
         )
         return True
 
-    async def _ask_stall(self, message: str) -> str:
+    def _notify_stall(self, message: str) -> None:
+        """Ask the UI to show a non-blocking notice; never wait for a decision."""
         if self.controller is None:
-            return "cancel"
-        if self._suppress_stall_prompts:
-            return "continue_silent"
-        # 让网络事件循环继续运行；否则对话框打开期间底层超时回调会堆积，
-        # 用户点击继续等待后会立即拿到已经超时的旧结果并再次弹窗。
-        return await asyncio.to_thread(self.controller.ask, message)
+            return
+        try:
+            self.controller.notify(message)
+        except Exception:
+            pass
+
+    def _poll_stall_decision(self) -> Optional[str]:
+        if self.controller is None:
+            return None
+        try:
+            return self.controller.poll()
+        except Exception:
+            return None
+
+    def _clear_stall_notice(self) -> None:
+        if self.controller is None:
+            return
+        try:
+            self.controller.clear()
+        except Exception:
+            pass
 
     async def _wait_with_cancel(self, seconds: float) -> None:
         deadline = time.perf_counter() + seconds

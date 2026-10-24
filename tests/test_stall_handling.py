@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import tts_engine
 from edge_tts import communicate as edge_tts_communicate
-from tts_engine import TTSConfig, TTSEngine
+from tts_engine import StallController, TTSConfig, TTSEngine
 
 
 class _FailingCommunicate:
@@ -35,6 +35,23 @@ class _SilentCommunicate:
             yield None
         await asyncio.sleep(30)
         yield {"type": "audio", "data": b"never"}
+
+
+class _DelayedSuccessfulCommunicate:
+    """先静默一段时间，再返回一条完整的最小合成结果。"""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def stream(self):
+        await asyncio.sleep(0.03)
+        yield {
+            "type": "SentenceBoundary",
+            "text": "Hello world.",
+            "offset": 0,
+            "duration": 10_000_000,
+        }
+        yield {"type": "audio", "data": b"\xff\xfb\x90\x00" * 64}
 
 
 class _SuccessfulCommunicate:
@@ -64,29 +81,47 @@ class _ForbiddenCommunicate:
 
 
 class _RecordingController:
-    def __init__(self, first_decision, first_delay=0.0):
-        self._first_decision = first_decision
-        self._first_delay = first_delay
-        self._lock = threading.Lock()
-        self.ask_times = []
-        self.return_times = []
-        self.calls = 0
+    """Non-blocking test controller with explicit user decisions."""
 
-    def ask(self, _message):
+    def __init__(self, decisions=()):
+        self._decisions = list(decisions)
+        self._lock = threading.Lock()
+        self.notices = []
+        self.clear_calls = 0
+
+    def notify(self, message):
         with self._lock:
-            self.calls += 1
-            call_number = self.calls
-            self.ask_times.append(time.perf_counter())
-        if call_number == 1:
-            if self._first_delay:
-                time.sleep(self._first_delay)
-            with self._lock:
-                self.return_times.append(time.perf_counter())
-            return self._first_decision
-        return "cancel"
+            self.notices.append(message)
+
+    def poll(self):
+        with self._lock:
+            if not self.notices:
+                return None
+            return self._decisions.pop(0) if self._decisions else None
+
+    def clear(self):
+        with self._lock:
+            self.clear_calls += 1
 
 
 class StallHandlingTests(unittest.TestCase):
+    def test_stall_controller_notify_poll_and_clear_do_not_block(self):
+        requests = []
+        clears = []
+        controller = StallController(requests.append, lambda: clears.append(True))
+
+        started = time.perf_counter()
+        controller.notify("quiet")
+        elapsed = time.perf_counter() - started
+
+        self.assertLess(elapsed, 0.05)
+        self.assertEqual(requests, ["quiet"])
+        self.assertIsNone(controller.poll())
+        controller.decide("retry")
+        self.assertEqual(controller.poll(), "retry")
+        controller.clear()
+        self.assertEqual(clears, [True])
+
     def test_uses_edge_155_synthesis_endpoint_for_legacy_edge_tts(self):
         original_url = edge_tts_communicate.WSS_URL
         try:
@@ -100,8 +135,8 @@ class StallHandlingTests(unittest.TestCase):
         finally:
             edge_tts_communicate.WSS_URL = original_url
 
-    def test_service_rejection_does_not_show_stall_prompt(self):
-        controller = _RecordingController("continue")
+    def test_service_rejection_does_not_show_stall_notice(self):
+        controller = _RecordingController()
         engine = TTSEngine(controller=controller)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -112,98 +147,123 @@ class StallHandlingTests(unittest.TestCase):
                 )
 
         self.assertEqual(outcome, "error")
-        self.assertEqual(controller.calls, 0)
+        self.assertEqual(controller.notices, [])
         self.assertIn("403", engine.error_message)
 
-    def test_continue_waiting_restarts_grace_before_reporting_stream_failure(self):
-        controller = _RecordingController("continue", first_delay=0.03)
+    def test_silent_stream_keeps_waiting_until_audio_resumes(self):
+        controller = _RecordingController()
         engine = TTSEngine(controller=controller)
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output.mp3"
-            with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
+            with patch(
+                "tts_engine.edge_tts.Communicate", _DelayedSuccessfulCommunicate
+            ), patch.multiple(
                 tts_engine,
-                STALL_AUTO_RETRIES=0,
                 STALL_TIMEOUT=0.005,
                 STALL_FIRST_AUDIO_TIMEOUT=0.005,
-                STALL_WAIT_GRACE=0.06,
                 STALL_SILENT_POLL=0.005,
                 RECEIVE_TIMEOUT=1,
             ):
+                started = time.perf_counter()
                 outcome = asyncio.run(
                     engine._stream_once("hello", output, TTSConfig())
                 )
+                elapsed = time.perf_counter() - started
 
-        self.assertEqual(outcome, "cancel")
-        self.assertEqual(controller.calls, 2)
-        self.assertGreaterEqual(
-            controller.ask_times[1] - controller.return_times[0],
-            0.045,
-        )
+        self.assertEqual(outcome, "done")
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(len(controller.notices), 1)
+        self.assertGreaterEqual(controller.clear_calls, 1)
 
-    def test_dont_remind_suppresses_followup_prompt(self):
-        controller = _RecordingController("continue_silent")
-        engine = TTSEngine(controller=controller)
-
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "output.mp3"
-            with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
-                tts_engine,
-                STALL_AUTO_RETRIES=0,
-                STALL_TIMEOUT=0.005,
-                STALL_FIRST_AUDIO_TIMEOUT=0.005,
-                STALL_WAIT_GRACE=0.06,
-                STALL_SILENT_POLL=0.005,
-                RECEIVE_TIMEOUT=1,
-            ):
-                outcome = asyncio.run(
-                    engine._stream_once("hello", output, TTSConfig())
-                )
-
-        self.assertEqual(outcome, "retry")
-        self.assertEqual(controller.calls, 1)
-
-    def test_transient_failure_auto_retries_before_prompting(self):
-        controller = _RecordingController("cancel")
-        engine = TTSEngine(controller=controller)
-
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "output.mp3"
-            with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
-                tts_engine,
-                STALL_AUTO_RETRIES=1,
-                RECEIVE_TIMEOUT=1,
-            ):
-                first = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
-                second = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
-
-        # 第一次失败静默自动重试，不再打扰用户；额度用完后才弹窗。
-        self.assertEqual(first, "retry")
-        self.assertEqual(second, "cancel")
-        self.assertEqual(controller.calls, 1)
-
-    def test_silent_stream_auto_retries_before_prompting(self):
-        controller = _RecordingController("cancel")
+    def test_retry_decision_reopens_stream_without_blocking(self):
+        controller = _RecordingController(["retry"])
         engine = TTSEngine(controller=controller)
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output.mp3"
             with patch("tts_engine.edge_tts.Communicate", _SilentCommunicate), patch.multiple(
                 tts_engine,
-                STALL_AUTO_RETRIES=1,
-                STALL_TIMEOUT=0.01,
-                STALL_FIRST_AUDIO_TIMEOUT=0.01,
+                STALL_TIMEOUT=0.005,
+                STALL_FIRST_AUDIO_TIMEOUT=0.005,
+                STALL_SILENT_POLL=0.005,
                 RECEIVE_TIMEOUT=1,
             ):
-                # 连上后一直没有数据：先自动重试一次，不弹窗。
+                started = time.perf_counter()
+                outcome = asyncio.run(
+                    engine._stream_once("hello", output, TTSConfig())
+                )
+                elapsed = time.perf_counter() - started
+
+        self.assertEqual(outcome, "retry")
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(len(controller.notices), 1)
+
+    def test_continue_decision_keeps_waiting_without_reopening_stream(self):
+        controller = _RecordingController(["continue"])
+        engine = TTSEngine(controller=controller)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.mp3"
+            with patch(
+                "tts_engine.edge_tts.Communicate", _DelayedSuccessfulCommunicate
+            ), patch.multiple(
+                tts_engine,
+                STALL_TIMEOUT=0.005,
+                STALL_FIRST_AUDIO_TIMEOUT=0.005,
+                STALL_SILENT_POLL=0.005,
+                RECEIVE_TIMEOUT=1,
+            ):
+                outcome = asyncio.run(
+                    engine._stream_once("hello", output, TTSConfig())
+                )
+
+        self.assertEqual(outcome, "done")
+        self.assertEqual(len(controller.notices), 1)
+        self.assertGreaterEqual(controller.clear_calls, 1)
+
+    def test_no_user_action_does_not_auto_retry(self):
+        controller = _RecordingController()
+        engine = TTSEngine(controller=controller)
+        cancel_timer = threading.Timer(0.04, engine.cancel_event.set)
+        cancel_timer.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "output.mp3"
+                with patch("tts_engine.edge_tts.Communicate", _SilentCommunicate), patch.multiple(
+                    tts_engine,
+                    STALL_TIMEOUT=0.005,
+                    STALL_FIRST_AUDIO_TIMEOUT=0.005,
+                    STALL_SILENT_POLL=0.005,
+                    RECEIVE_TIMEOUT=1,
+                ):
+                    outcome = asyncio.run(
+                        engine._stream_once("hello", output, TTSConfig())
+                    )
+        finally:
+            cancel_timer.cancel()
+
+        self.assertEqual(outcome, "cancel")
+        self.assertEqual(len(controller.notices), 1)
+
+    def test_transient_failure_auto_retries_without_stall_notice(self):
+        controller = _RecordingController()
+        engine = TTSEngine(controller=controller)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.mp3"
+            with patch("tts_engine.edge_tts.Communicate", _FailingCommunicate), patch.multiple(
+                tts_engine,
+                STALL_AUTO_RETRIES=1,
+                RECEIVE_TIMEOUT=1,
+            ):
                 first = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
-                self.assertEqual(first, "retry")
-                self.assertEqual(controller.calls, 0)
-                # 自动重试额度用完后才询问用户。
                 second = asyncio.run(engine._stream_once("hello", output, TTSConfig()))
 
-        self.assertEqual(second, "cancel")
-        self.assertEqual(controller.calls, 1)
+        self.assertEqual(first, "retry")
+        self.assertEqual(second, "retry")
+        self.assertEqual(controller.notices, [])
 
     def test_recreates_missing_output_directory_before_streaming(self):
         """缓存目录被清理后，生成应该自动补建目录而不是报错。"""

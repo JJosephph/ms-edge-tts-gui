@@ -12,7 +12,16 @@ $lines = foreach ($file in $files) {
         throw "Missing release artifact: $file"
     }
 
-    $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($file)
+    try {
+        $bytes = $sha256.ComputeHash($stream)
+        $hash = [System.BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
     $name = [System.IO.Path]::GetFileName($file)
     "$hash  $name"
 }

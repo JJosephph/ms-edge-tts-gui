@@ -75,6 +75,11 @@
 
 **Edge TTS 语音合成助手**是一款免费、开源的 Windows 桌面软件（GPL-3.0-or-later，开发者 WangYufan）。它把文章、脚本和字幕文稿合成为自然的 MP3 音频，不需要 API Key。软件提供**普通、逐页、逐行**三种工作模式，并支持独立句间停顿、行末真实静音、SRT 字幕、时间轴 JSON、逐句试听高亮、可拖动播放进度和批量 ZIP 导出。界面可随时切换中文和 English，适合旁白制作、视频剪辑、跟读学习和批量配音。
 
+### v1.7.1 更新亮点
+
+- **生成等待提示更友好**：长时间没有收到新音频时，不再弹出类似报错的模态窗口；进度栏旁会出现一个非阻塞的 `!` 提示，悬停后可选择「继续等待」或「重试」。不操作时会继续等待，不会自动中断或重开连接。
+- **连接异常自动重试**：限流、服务端临时错误和连接中断会在后台按策略重试，避免生成过程中被多个弹窗反复打断。
+
 ### v1.7.0 更新亮点
 
 - **普通模式批量上传**：无需切换到独立模式，点击「批量上传」即可拖入或选择多个 `txt / md / docx / pdf`；原输入框会变成逐行文件列表，不点击时仍保持原有粘贴文本流程。
@@ -269,7 +274,9 @@ lines_archive.zip
 
 **Edge TTS Voice Studio** is a modern Windows desktop application for turning articles, notes, scripts, documentation, and other text into high-quality MP3 audio. It is powered by the open-source [`edge-tts`](https://github.com/rany2/edge-tts) library and Microsoft Edge online voices—**no API key is required**. It is **free and open source under the GPL-3.0-or-later license**, developed by **WangYufan**.
 
-The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. Normal mode also includes an embedded **Batch Upload** workspace: paste text as before, or drop/select multiple files, configure each row independently, generate all files, and export a ZIP. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page, line, or file batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a stalled-generation prompt help with real-world network conditions.
+The project is designed as a general-purpose open-source tool with three focused work modes: **Normal** mode for one complete text box, **Page** mode for `[分页]`-separated document batches, and **Line** mode for one audio file per non-empty line. Normal mode also includes an embedded **Batch Upload** workspace: paste text as before, or drop/select multiple files, configure each row independently, generate all files, and export a ZIP. It also supports independent sentence pauses in milliseconds, optional SRT subtitles, timeline JSON, live sentence highlighting, example TXT files, and ZIP export for page, line, or file batches. A **Language → Gender → Voice** cascading picker covers hundreds of voices, while service reachability checks, proxy-aware diagnostics, retry controls, and a non-blocking stall notice help with real-world network conditions.
+
+**v1.7.1 highlights:** Long silent waits now use a non-blocking `!` notice beside the progress bar instead of a modal that looks like an error. Hover it to keep waiting or retry; doing nothing keeps the current request alive. Connection drops, rate limits, and temporary service errors retry in the background.
 
 **v1.7.0 highlights:** Normal mode now has an embedded file batch with per-file settings and first-line rules such as `{Abeo|200ms{,.~}|srt}`. Completed items are preserved across retries, completed batches can be exported together or individually as ZIP files, and Unicode output filenames no longer trigger the `failed to decode file (-7)` error.
 
