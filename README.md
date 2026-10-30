@@ -6,6 +6,11 @@
 </p>
 
 <p align="center">
+  <a href="https://edgettsgui.ainav.site/"><strong>🌐 官方网站 / Official Website：edgettsgui.ainav.site</strong></a><br>
+  <sub>功能介绍、界面预览与下载入口 / Features, screenshots and downloads</sub>
+</p>
+
+<p align="center">
   <a href="https://github.com/JJosephph/ms-edge-tts-gui/releases"><img src="https://img.shields.io/github/v/release/JJosephph/ms-edge-tts-gui?display_name=tag&sort=semver&color=5A8CFF" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-61D69C.svg" alt="GPL-3.0-or-later"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-356FEB.svg" alt="Python 3.10+">
@@ -14,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="https://edgettsgui.ainav.site/">官网</a> ·
   <a href="#中文说明">中文说明</a> ·
   <a href="#english-guide">English guide</a> ·
   <a href="#qq-交流群--qq-group">QQ 交流群</a> ·
@@ -250,6 +256,8 @@ lines_archive.zip
 
 ### 下载与使用
 
+官网 [https://edgettsgui.ainav.site/](https://edgettsgui.ainav.site/) 提供功能介绍、界面预览与下载入口。
+
 1. 在 [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) 下载 `EdgeTTSGui-Setup.exe`，安装时可选任意磁盘或文件夹。
 2. 安装包与便携版 EXE 均已内置 Python 运行环境，Windows 10 及更高版本无需另行安装 Python。
 3. 粘贴文章、选择语音、调整语速 / 音量 / 音调，点击“生成音频”合成一次；之后点“试听”播放，或点“保存下载”导出 MP3，全程无需重复合成。
@@ -355,6 +363,8 @@ Example `.timeline.json`:
 > Use cases: subtitles, video editing alignment, language shadowing, sentence-by-sentence review, podcast transcripts.
 
 ## Downloads
+
+Official website: **[https://edgettsgui.ainav.site/](https://edgettsgui.ainav.site/)** — features, screenshots, and download entry points.
 
 Open the [Releases](https://github.com/JJosephph/ms-edge-tts-gui/releases) page and choose the package that fits your use case:
 
