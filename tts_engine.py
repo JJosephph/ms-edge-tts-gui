@@ -1006,6 +1006,7 @@ class TTSConfig:
     sentence_pause_marks: tuple[str, ...] = ()
     line_pause_enabled: bool = False
     line_pause_ms: int = 0
+    provider: str = "edge"
 
 
 class TTSEngine:

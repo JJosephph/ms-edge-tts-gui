@@ -29,3 +29,18 @@ This project depends on third-party Python packages listed in
 requirements.txt and requirements-dev.txt. Those components remain
 under their own licenses. See each dependency's distribution for
 its complete license and notice terms.
+
+Optional local Chinese voices:
+Kokoro-82M-v1.1-zh
+Copyright and model credit: hexgrad and the Kokoro contributors.
+Licensed under the Apache License, Version 2.0.
+https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh
+https://github.com/hexgrad/kokoro
+
+The Chinese voice pack is bundled with the Windows installer and is
+available offline after installation. The portable executable keeps
+the optional download path to avoid extracting the large model on
+every launch. Every downloaded copy is validated by SHA-256 before
+installation. The pack includes the model's LICENSE file and is used
+through sherpa-onnx. sherpa-onnx remains under its own Apache-2.0
+license and is listed in requirements.txt.

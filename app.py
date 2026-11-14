@@ -15,6 +15,7 @@ import os
 import queue
 import re
 import shutil
+import sys
 import zipfile
 import tempfile
 import time
@@ -55,6 +56,27 @@ from tts_engine import (
 )
 from text_utils import clean_text, default_filename, normalize_for_tts
 from update_checker import ReleaseInfo, UpdateCheckResult, check_for_updates
+from local_tts import (
+    LOCAL_VOICES,
+    MODEL_SIZE,
+    PROVIDER_EDGE,
+    PROVIDER_KOKORO,
+    LocalTTSEngine,
+    download_model,
+    is_local_voice,
+    local_voice,
+    local_voices,
+    model_directory,
+    model_installed,
+    provider_for_voice,
+    resolved_model_directory,
+)
+from voice_catalog import (
+    MULTILINGUAL_VOICES,
+    is_chinese_locale,
+    is_multilingual_voice,
+    merge_voice_catalog,
+)
 from voice_groups import (
     GENDER_ALL,
     GENDER_FEMALE,
@@ -62,6 +84,13 @@ from voice_groups import (
     GENDER_OTHER,
     VoiceGroupingEngine,
 )
+from voice_favorites import (
+    clamp_panel_width,
+    filter_favorites,
+    normalize_favorites,
+    toggle_favorite,
+)
+from voice_picker import VoicePicker
 from page_import import (
     Page,
     import_file,
@@ -71,12 +100,24 @@ from page_import import (
 )
 
 APP_NAME = "Edge TTS 语音合成助手"
-APP_VERSION = "1.7.2"
+APP_VERSION = "1.7.3"
 DEVELOPER = "WangYufan"
 DEVELOPER_QQ = "1471056247"
 REPOSITORY_URL = "https://github.com/JJosephph/ms-edge-tts-gui"
 REPOSITORY_DISPLAY = "github.com/JJosephph/ms-edge-tts-gui"
 UI_FONT_FAMILY = "Microsoft YaHei UI"
+SYMBOL_FONT_FAMILY = "Segoe UI Symbol"
+LOG_MAX_LINES = 300
+MULTILINGUAL_NAMES_ZH = dict(MULTILINGUAL_VOICES)
+VOICE_PREVIEW_TEXT_ZH = "你好，这是一段语音试听。欢迎使用 Edge TTS 语音合成助手。"
+VOICE_PREVIEW_TEXT_EN = "Hi, this is a voice preview. Welcome to Edge TTS Voice Studio."
+
+
+def resource_path(relative: str) -> Path:
+    """Resolve a bundled asset in both source and PyInstaller builds."""
+    base = getattr(sys, "_MEIPASS", None)
+    root = Path(base) if base else Path(__file__).resolve().parent
+    return root / relative
 
 
 def normalize_saved_pause(value: object, default: int = 0) -> int:
@@ -148,6 +189,54 @@ class TTSTask:
         self.mode = mode  # "preview" | "export"
 
 
+class LocalTaskEngine:
+    """Thin adapter so local synthesis shares the existing task queue."""
+
+    def __init__(
+        self,
+        model_dir,
+        cancel_event=None,
+        on_log=None,
+        on_progress=None,
+    ):
+        self.model_dir = model_dir
+        self.cancel_event = cancel_event or threading.Event()
+        self.on_log = on_log
+        self.on_progress = on_progress
+        self.timeline = None
+
+    def generate(self, text, output_path, cfg):
+        if self.on_log:
+            self.on_log("[本地音色] 使用离线模型合成，不依赖微软服务。")
+        local = LocalTTSEngine(
+            self.model_dir,
+            cancel_event=self.cancel_event,
+        )
+
+        def progress(done, total):
+            if self.on_progress:
+                self.on_progress(
+                    min(100.0, done / max(1, total) * 100.0), 0
+                )
+
+        try:
+            local.synthesize_to_mp3(
+                text,
+                cfg.voice,
+                output_path,
+                rate=cfg.rate,
+                volume=cfg.volume,
+                pause_ms=cfg.sentence_pause_ms,
+                progress=progress,
+            )
+        except InterruptedError:
+            return {"status": "canceled"}
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "error": str(exc)}
+        self.timeline = None
+        return {"status": "done", "path": str(output_path)}
+
+
 @dataclass
 class FileBatchItem:
     """One source document in normal mode's optional file-batch workspace."""
@@ -185,6 +274,7 @@ class App(ctk.CTk):
         ctk.ThemeManager.theme["CTkFont"]["family"] = self._font_family
 
         self.title(f"{APP_NAME} v{APP_VERSION}")
+        self._apply_window_icon()
         # Fit the window to the display so it never opens larger than the
         # available screen (small laptops, 1366x768 panels, high-DPI displays).
         scale = ctk.ScalingTracker.get_window_scaling(self) or 1.0
@@ -221,6 +311,39 @@ class App(ctk.CTk):
         self._lang_map: dict = {}
         self._gender_map: dict = {}
         self._selected_voice_code = str(self._settings.get("voice") or DEFAULT_VOICE)
+        saved_provider = str(self._settings.get("voice_provider") or "")
+        self._voice_provider = (
+            PROVIDER_KOKORO
+            if saved_provider == PROVIDER_KOKORO
+            and is_local_voice(self._selected_voice_code)
+            else PROVIDER_EDGE
+        )
+        # The bundled copy is read-only; keep the user-data path separately
+        # so a repair download can still target a writable directory.
+        self._local_model_repair_dir = model_directory()
+        self._local_model_dir = resolved_model_directory(
+            self._local_model_repair_dir
+        )
+        self._local_model_ready = model_installed(self._local_model_dir)
+        self._local_download_state = "idle"
+        self._local_download_cancel = threading.Event()
+        self._local_download_progress = 0
+        self._voice_query = ""
+        self._voice_filter_after = None
+        self._favorites = list(
+            normalize_favorites(self._settings.get("voice_favorites", []))
+        )
+        self._favorites_only = False
+        self._favorites_toggle = None
+        self._voice_preview_busy = False
+        self._voice_preview_playing = False
+        self._voice_preview_state = "idle"
+        self._voice_preview_code = ""
+        self._voice_preview_path = str(SETTINGS_DIR / "voice_preview.mp3")
+        self._voice_preview_cancel = threading.Event()
+        self._voice_preview_token = 0
+        self._voice_preview_poll_after = None
+        self._voice_filtered_count = 0
         self._rate_value = saved_int(self._settings, "rate", DEFAULT_RATE)
         self._volume_value = saved_int(self._settings, "volume", DEFAULT_VOLUME)
         self._pitch_value = saved_int(self._settings, "pitch", DEFAULT_PITCH)
@@ -247,6 +370,7 @@ class App(ctk.CTk):
         self._srt_fill_var = None
         self._pause_var = None
         self._highlight_running = False
+        self._highlight_after = None
         self._highlight_ranges: list = []
         self._workflow_mode = "normal"
         self._mode_selector = None
@@ -275,6 +399,15 @@ class App(ctk.CTk):
         }
         self._dnd_ready = False
         self._dnd_available = False
+        self._workspace = None
+        self._composer = None
+        self._deck_shell = None
+        self._splitter = None
+        self._splitter_handle = None
+        self._splitter_start_x = None
+        self._splitter_start_width = None
+        self._deck_width = 375
+        self._applied_deck_width = None
         self._batch_frame = None
         self._batch_tree = None
         self._batch_summary = None
@@ -299,6 +432,11 @@ class App(ctk.CTk):
         self._btn_result_preview = None
         self._mode_settings_title = None
         self._mode_settings_hint = None
+        self._mode_settings_body = None
+        self._mode_settings_expand = None
+        self._mode_settings_expanded = bool(
+            self._settings.get("advanced_settings_expanded", False)
+        )
         self._pause_label = None
         self._pause_entry = None
         self._pause_duration_row = None
@@ -319,6 +457,7 @@ class App(ctk.CTk):
         self._srt_fill_hint = None
         self._play_button_active = False
         self._play_poll_after = None
+        self._poll_after = None
         self._stall_indicator = None
         self._stall_popover = None
         self._stall_popover_label = None
@@ -326,9 +465,95 @@ class App(ctk.CTk):
 
         self._build_ui()
         self._bind_events()
+        self._bind_splitter_resize()
+        # Local voices are available without a successful Edge catalogue
+        # request. Populate the picker immediately so a slow/offline network
+        # cannot leave Language/Gender blank.
+        self._refresh_voice_selectors()
 
         # 启动后后台加载语音列表 + 网络探测
         self.after(400, self._start_background_jobs)
+
+    def _bind_splitter_resize(self):
+        workspace = getattr(self, "_workspace", None)
+        if workspace is not None:
+            workspace.bind("<Configure>", self._on_workspace_resize, add="+")
+
+    def _on_workspace_resize(self, event):
+        """Keep the saved deck width legal after the window is resized."""
+        deck = getattr(self, "_deck_shell", None)
+        if deck is None:
+            return
+        width = clamp_panel_width(
+            self._deck_width, max(event.width, 1000), 320, 560
+        )
+        self._set_deck_width(width, persist=False)
+
+    def _set_deck_width(self, width, persist=True):
+        workspace = getattr(self, "_workspace", None)
+        if workspace is None:
+            return
+        total = max(workspace.winfo_width(), 1000)
+        width = int(clamp_panel_width(width, total, 320, 560))
+        self._deck_width = width
+        if getattr(self, "_applied_deck_width", None) != width:
+            self._applied_deck_width = width
+            workspace.grid_columnconfigure(2, weight=0, minsize=width)
+        if persist:
+            self._settings["panel_width"] = width
+
+    def _on_splitter_enter(self, _event=None):
+        handle = getattr(self, "_splitter_handle", None)
+        if handle is not None:
+            handle.configure(fg_color=self._c("accent"))
+
+    def _on_splitter_leave(self, _event=None):
+        handle = getattr(self, "_splitter_handle", None)
+        if handle is not None:
+            handle.configure(fg_color=self._c("border"))
+
+    def _on_splitter_press(self, event):
+        self._splitter_start_x = event.x_root
+        self._splitter_start_width = self._deck_width
+
+    def _on_splitter_drag(self, event):
+        start_x = getattr(self, "_splitter_start_x", None)
+        start_width = getattr(self, "_splitter_start_width", None)
+        if start_x is None or start_width is None:
+            return
+        # Moving left widens the composer and narrows the voice deck.
+        self._set_deck_width(start_width - (event.x_root - start_x), persist=False)
+
+    def _on_splitter_release(self, _event=None):
+        self._splitter_start_x = None
+        self._splitter_start_width = None
+        self._settings["panel_width"] = int(self._deck_width)
+        self._save_settings()
+
+    def _apply_window_icon(self):
+        """Give the window and Windows taskbar our own icon, not Python's."""
+        icon = resource_path(os.path.join("assets", "app.ico"))
+        if not icon.is_file():
+            return
+        try:
+            self.iconbitmap(default=str(icon))
+        except (tk.TclError, OSError):
+            try:
+                self.iconbitmap(str(icon))
+            except (tk.TclError, OSError):
+                pass
+        # A process-level AppUserModelID makes Windows group the running app
+        # under its own taskbar button instead of the host interpreter.
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "WangYufan.EdgeTTSGui"
+            )
+        except Exception:  # noqa: BLE001 - cosmetic only
+            pass
 
     # ============================================================ UI 构建
 
@@ -433,7 +658,45 @@ class App(ctk.CTk):
         },
 
         "search": {"zh": "搜索语音，如：晓晓 / Andrew…", "en": "Search voices, e.g. Xiaoxiao / Andrew…"},
-        "voices_load_error": {"zh": "语音列表加载失败，请检查网络后点 ↻ 重试", "en": "Could not load the voice list - check network and click ↻ to retry"},
+        "voice_search": {"zh": "搜索名称或代码", "en": "Name or code"},
+        "voice_count": {"zh": "命中 {count} 个", "en": "{count} matches"},
+        "voice_total": {"zh": "{count} 个音色", "en": "{count} voices"},
+        "voice_no_match": {"zh": "没有匹配的音色", "en": "No matching voices"},
+        "voice_favorites": {"zh": "收藏", "en": "Saved"},
+        "voice_favorites_filter": {"zh": "只看收藏", "en": "Saved only"},
+        "voice_layout_hint": {"zh": "拖动分隔条可调宽", "en": "Drag the divider to resize"},
+        "voice_no_favorites": {"zh": "还没有收藏音色", "en": "No saved voices yet"},
+        "voice_favorites_count": {"zh": "已收藏 {count} 个", "en": "{count} saved"},
+        "expand": {"zh": "展开", "en": "Show"},
+        "collapse": {"zh": "收起", "en": "Hide"},
+        "voice_preview": {"zh": "试听此音色", "en": "Preview Voice"},
+        "voice_preview_generating": {"zh": "正在生成试听…", "en": "Preparing preview…"},
+        "voice_preview_playing": {"zh": "■ 停止试听", "en": "■ Stop Preview"},
+        "voice_preview_failed": {"zh": "试听生成失败", "en": "Preview failed"},
+        "voice_multilingual": {"zh": "多语言", "en": "Multilingual"},
+        "lang_count": {"zh": " · {count} 个", "en": " · {count}"},
+        "voice_provider": {"zh": "语音来源", "en": "Voice source"},
+        "provider_edge": {"zh": "微软在线", "en": "Microsoft online"},
+        "provider_local": {"zh": "本地增强", "en": "Local enhanced"},
+        "provider_edge_desc": {"zh": "微软 Edge 在线", "en": "Microsoft Edge"},
+        "provider_local_desc": {"zh": "Kokoro 离线", "en": "Kokoro offline"},
+        "result_short": {"zh": "结果", "en": "Result"},
+        "voice_all": {"zh": "全部语音", "en": "All voices"},
+        "voice_search_clear": {"zh": "清空搜索", "en": "Clear search"},
+        "provider_local_tip": {"zh": "离线可用 · 8 个精选音色", "en": "Offline · 8 selected voices"},
+        "local_not_installed": {"zh": "本地语音包缺失，可下载修复（约 140 MB）", "en": "Local voice pack is missing. Download it to repair (about 140 MB)"},
+        "local_download": {"zh": "下载修复语音包", "en": "Repair voice pack"},
+        "local_downloading": {"zh": "正在下载 {percent}%", "en": "Downloading {percent}%"},
+        "local_download_hint": {"zh": "安装包已内置 Kokoro v1.1-zh · Apache-2.0", "en": "Kokoro v1.1-zh · Apache-2.0 is bundled with the installer"},
+        "local_ready": {"zh": "本地增强已就绪 · 8 个精选中文音色", "en": "Local voices ready · 8 selected Chinese voices"},
+        "local_ready_short": {"zh": "离线语音包已就绪", "en": "Offline voice pack ready"},
+        "local_subtitle_off": {"zh": "本地音色不提供精准时间轴 / SRT", "en": "Precise timeline / SRT is unavailable for local voices"},
+        "local_pitch_off": {"zh": "音调仅在线音色可调", "en": "Pitch is available for online voices only"},
+        "local_generating": {"zh": "本地模型生成中，请稍候…", "en": "Local model is generating, please wait…"},
+        "local_download_failed": {"zh": "语音包下载失败", "en": "Voice pack download failed"},
+        "local_cancel_download": {"zh": "取消下载", "en": "Cancel download"},
+        "voices_load_error": {"zh": "语音列表加载失败，请检查网络后重试", "en": "Could not load the voice list - check network and retry"},
+        "reload_voices": {"zh": "重新加载语音", "en": "Reload voices"},
         "voices_reloading": {"zh": "正在重新加载语音列表…", "en": "Reloading voice list…"},
         "voices_loaded": {"zh": "已加载语音（{count} 个，{langs} 种语言）", "en": "Voices loaded ({count} voices, {langs} languages)"},
         "original": {"zh": "原工作流默认：Andrew Multilingual · 语速 +0% · 音量 +0% · 音调 +0Hz", "en": "Original workflow: Andrew Multilingual · rate +0% · volume +0% · pitch +0Hz"},
@@ -649,6 +912,8 @@ class App(ctk.CTk):
         return self._t("app")
 
     def _localized_locale(self, locale: str) -> str:
+        if locale == "local":
+            return "中文（本地）" if self._language == "zh" else "Chinese (local)"
         if self._language != "zh":
             return locale
         parts = (locale or "").split("-", 1)
@@ -659,6 +924,11 @@ class App(ctk.CTk):
         return language
 
     def _localized_voice_name(self, code: str) -> str:
+        voice = local_voice(code)
+        if voice is not None:
+            return voice.name_zh if self._language == "zh" else voice.name_en
+        if code in MULTILINGUAL_NAMES_ZH:
+            return MULTILINGUAL_NAMES_ZH[code]
         stem = code.rsplit("-", 1)[-1].removesuffix("Neural")
         return self.VOICE_NAMES_ZH.get(stem, stem)
 
@@ -795,6 +1065,16 @@ class App(ctk.CTk):
 
     def _rebuild_ui(self):
         self._cancel_stall_popover_hide()
+        self._stop_voice_preview()
+        self._stop_playback()
+        for attr in ("_poll_after", "_play_poll_after", "_highlight_after"):
+            timer = getattr(self, attr, None)
+            if timer is not None:
+                try:
+                    self.after_cancel(timer)
+                except tk.TclError:
+                    pass
+                setattr(self, attr, None)
         text = self._textbox.get("1.0", "end-1c")
         if self._workflow_mode == "normal":
             if not self._file_batch_active:
@@ -809,12 +1089,14 @@ class App(ctk.CTk):
             child.destroy()
         self.title(f"{self._app_name()} v{APP_VERSION}")
         self.configure(fg_color=self._c("app_bg"))
+        self._apply_window_icon()
         self._rate_value = rate
         self._volume_value = volume
         self._pitch_value = pitch
         self._selected_voice_code = voice
         self._build_ui()
         self._bind_events()
+        self._bind_splitter_resize()
         if text:
             self._textbox.insert("1.0", text)
         self._refresh_voice_selectors()
@@ -836,11 +1118,19 @@ class App(ctk.CTk):
             self._refresh_file_batch_tree()
             self._load_file_item_into_controls(self._selected_file_index)
         self._update_mode_ui()
-        self.after(150, self._poll_ui)
+        self._schedule_poll_ui()
 
     def _switch_theme(self):
         if self._busy:
             messagebox.showinfo(self._app_name(), "Please stop the current task first." if self._language == "en" else "请先停止当前任务。")
+            return
+        if self._voice_preview_state in ("generating", "playing"):
+            messagebox.showinfo(
+                self._app_name(),
+                "Please stop the voice preview first."
+                if self._language == "en"
+                else "请先停止音色试听。",
+            )
             return
         self._theme = "light" if self._theme == "dark" else "dark"
         self._settings["theme"] = self._theme
@@ -851,6 +1141,14 @@ class App(ctk.CTk):
     def _switch_language(self):
         if self._busy:
             messagebox.showinfo(self._app_name(), "Please stop the current task first." if self._language == "en" else "请先停止当前任务。")
+            return
+        if self._voice_preview_state in ("generating", "playing"):
+            messagebox.showinfo(
+                self._app_name(),
+                "Please stop the voice preview first."
+                if self._language == "en"
+                else "请先停止音色试听。",
+            )
             return
         self._language = "en" if self._language == "zh" else "zh"
         self._settings["ui_language"] = self._language
@@ -924,7 +1222,7 @@ class App(ctk.CTk):
         brand = ctk.CTkFrame(header, width=56, height=56, corner_radius=16, fg_color=self._c("primary"))
         brand.grid(row=0, column=0, rowspan=2, padx=(14, 10), pady=12)
         brand.grid_propagate(False)
-        ctk.CTkLabel(brand, text="♫", text_color="#FFFFFF", font=self._font(size=30, weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(brand, text="♪", text_color="#FFFFFF", font=self._font(size=30, weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
         ctk.CTkLabel(header, text=self._app_name(), text_color=self._c("text"), font=self._font(size=23, weight="bold")).grid(row=0, column=1, sticky="sw", pady=(13, 0))
         ctk.CTkLabel(header, text=self._t("tagline"), text_color=self._c("muted"), font=self._font(size=12)).grid(row=1, column=1, sticky="nw", pady=(0, 13))
 
@@ -954,11 +1252,21 @@ class App(ctk.CTk):
         workspace = ctk.CTkFrame(self, fg_color="transparent")
         workspace.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 10))
         workspace.grid_columnconfigure(0, weight=1)
-        workspace.grid_columnconfigure(1, weight=0)
+        saved_deck_width = clamp_panel_width(
+            self._settings.get("panel_width", 375),
+            max(self.winfo_width(), 1000),
+            320,
+            560,
+        )
+        workspace.grid_columnconfigure(1, weight=0, minsize=9)
+        workspace.grid_columnconfigure(2, weight=0, minsize=int(saved_deck_width))
         workspace.grid_rowconfigure(0, weight=1)
+        self._workspace = workspace
+        self._deck_width = int(saved_deck_width)
 
         composer = ctk.CTkFrame(workspace, corner_radius=20, fg_color=self._c("surface"), border_width=1, border_color=self._c("border"))
         composer.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self._composer = composer
         composer.grid_columnconfigure(0, weight=1)
         composer.grid_rowconfigure(3, weight=1)
         mode_row = ctk.CTkFrame(composer, fg_color="transparent")
@@ -1173,9 +1481,37 @@ class App(ctk.CTk):
             border_width=1,
             border_color=self._c("border"),
         )
-        deck_shell.grid(row=0, column=1, sticky="nsew")
+        deck_shell.grid(row=0, column=2, sticky="nsew")
+        self._deck_shell = deck_shell
+
+        # A 9px draggable gutter mirrors the split-view interaction users
+        # already know from editors: the content pane and the voice pane keep
+        # their own widths while the divider moves, and the choice persists.
+        splitter = ctk.CTkFrame(
+            workspace,
+            width=9,
+            corner_radius=0,
+            fg_color="transparent",
+        )
+        splitter.grid(row=0, column=1, sticky="ns", padx=(0, 0))
+        splitter.grid_propagate(False)
+        splitter_handle = ctk.CTkFrame(
+            splitter, width=2, height=44, corner_radius=2, fg_color=self._c("border")
+        )
+        splitter_handle.place(relx=0.5, rely=0.5, anchor="center")
+        self._splitter = splitter
+        self._splitter_handle = splitter_handle
+        for widget in (splitter, splitter_handle):
+            widget.configure(cursor="sb_h_double_arrow")
+            widget.bind("<Enter>", self._on_splitter_enter)
+            widget.bind("<Leave>", self._on_splitter_leave)
+            widget.bind("<ButtonPress-1>", self._on_splitter_press)
+            widget.bind("<B1-Motion>", self._on_splitter_drag)
+            widget.bind("<ButtonRelease-1>", self._on_splitter_release)
+        splitter.bind("<Double-Button-1>", lambda _event: self._set_deck_width(375))
         deck_shell.grid_columnconfigure(0, weight=1)
         deck_shell.grid_rowconfigure(0, weight=1)
+        deck_shell.grid_rowconfigure(1, weight=0)
         # The action area lives in a fixed footer so the primary "生成" button
         # stays reachable even when the settings panel has to scroll on shorter
         # windows or high-DPI displays.
@@ -1183,6 +1519,7 @@ class App(ctk.CTk):
         deck = ctk.CTkScrollableFrame(
             deck_shell,
             width=373,
+            height=520,
             corner_radius=0,
             fg_color=self._c("card"),
             border_width=0,
@@ -1192,6 +1529,7 @@ class App(ctk.CTk):
         )
         deck.grid(row=0, column=0, sticky="nsew", padx=1, pady=(1, 0))
         deck.grid_columnconfigure(0, weight=1)
+        deck._parent_frame.grid_propagate(False)
         deck_footer = ctk.CTkFrame(
             deck_shell, fg_color=self._c("card"), corner_radius=0, border_width=0
         )
@@ -1201,19 +1539,91 @@ class App(ctk.CTk):
             row=0, column=0, sticky="ew"
         )
 
-        ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("text"), font=self._font(size=18, weight="bold")).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 5))
+        self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
+        self._volume_var = tk.IntVar(value=getattr(self, "_volume_value", DEFAULT_VOLUME))
+        self._pitch_var = tk.IntVar(value=getattr(self, "_pitch_value", DEFAULT_PITCH))
 
-        # 语言 / 性别 二级筛选
+        voice_header = ctk.CTkFrame(deck, fg_color="transparent")
+        voice_header.grid(row=0, column=0, sticky="ew", padx=18, pady=(9, 3))
+        voice_header.grid_columnconfigure(0, weight=1)
+        voice_header.grid_columnconfigure(1, weight=0)
+        ctk.CTkLabel(
+            voice_header,
+            text=self._t("voice"),
+            text_color=self._c("text"),
+            font=self._font(size=16, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
+        # Source is a deliberate dropdown.  It separates Microsoft's online
+        # catalogue from the optional offline pack without making the two
+        # appear to be one mixed vendor list.
+        provider_row = ctk.CTkFrame(deck, fg_color="transparent")
+        provider_row.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 6))
+        provider_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            provider_row,
+            text=self._t("voice_provider"),
+            text_color=self._c("muted"),
+            font=self._font(size=12, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._provider_var = tk.StringVar(value=self._provider_label())
+        self._provider_switch = ctk.CTkComboBox(
+            provider_row,
+            values=[
+                self._provider_option(PROVIDER_EDGE),
+                self._provider_option(PROVIDER_KOKORO),
+            ],
+            variable=self._provider_var,
+            height=32,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            button_color=self._c("primary"),
+            button_hover_color=self._c("primary_hover"),
+            text_color=self._c("text"),
+            dropdown_fg_color=self._c("surface"),
+            dropdown_hover_color=self._c("card_raised"),
+            font=self._font(size=12),
+            dropdown_font=self._font(size=12),
+            command=self._on_provider_changed,
+        )
+        self._provider_switch.grid(row=0, column=1, sticky="ew")
+
+        local_panel = ctk.CTkFrame(deck, fg_color="transparent")
+        local_panel.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 2))
+        local_panel.grid_columnconfigure(0, weight=1)
+        self._local_status_label = ctk.CTkLabel(
+            local_panel,
+            text=self._local_status_text(),
+            text_color=self._c("muted"),
+            anchor="w",
+            justify="left",
+            wraplength=330,
+            font=self._font(size=10),
+        )
+        self._local_status_label.grid(row=0, column=0, sticky="ew")
+        self._btn_local_download = ctk.CTkButton(
+            local_panel,
+            text=self._t("local_download"),
+            width=96,
+            height=30,
+            font=self._font(size=11, weight="bold"),
+            fg_color=self._c("primary"),
+            hover_color=self._c("primary_hover"),
+            text_color="#FFFFFF",
+            command=self._toggle_local_model_download,
+        )
+        self._btn_local_download.grid(row=0, column=1, padx=(6, 0), sticky="ne")
+        self._local_panel = local_panel
+
         selectors = ctk.CTkFrame(deck, fg_color="transparent")
-        selectors.grid(row=1, column=0, sticky="ew", padx=18)
-        selectors.grid_columnconfigure(0, weight=3)
-        selectors.grid_columnconfigure(1, weight=2)
+        selectors.grid(row=3, column=0, sticky="ew", padx=18, pady=(2, 2))
+        selectors.grid_columnconfigure(0, weight=1, uniform="voice_filter")
+        selectors.grid_columnconfigure(1, weight=1, uniform="voice_filter")
         lang_cell = ctk.CTkFrame(selectors, fg_color="transparent")
-        lang_cell.grid(row=0, column=0, sticky="ew", padx=(0, 4))
-        ctk.CTkLabel(lang_cell, text=self._t("lang"), text_color=self._c("muted"), font=self._font(size=10, weight="bold")).pack(anchor="w")
+        lang_cell.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        ctk.CTkLabel(lang_cell, text=self._t("lang"), text_color=self._c("muted"), font=self._font(size=11, weight="bold")).pack(anchor="w")
         self._lang_var = tk.StringVar(value="")
         self._lang_combo = ctk.CTkComboBox(
-            lang_cell, values=[], variable=self._lang_var, height=30,
+            lang_cell, values=[], variable=self._lang_var, height=32,
             fg_color=self._c("field"), border_color=self._c("border"),
             button_color=self._c("primary"), button_hover_color=self._c("primary_hover"),
             text_color=self._c("text"), dropdown_fg_color=self._c("surface"),
@@ -1224,11 +1634,11 @@ class App(ctk.CTk):
         self._lang_combo.pack(fill="x")
 
         gender_cell = ctk.CTkFrame(selectors, fg_color="transparent")
-        gender_cell.grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        ctk.CTkLabel(gender_cell, text=self._t("gender"), text_color=self._c("muted"), font=self._font(size=10, weight="bold")).pack(anchor="w")
+        gender_cell.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+        ctk.CTkLabel(gender_cell, text=self._t("gender"), text_color=self._c("muted"), font=self._font(size=11, weight="bold")).pack(anchor="w")
         self._gender_var = tk.StringVar(value="")
         self._gender_combo = ctk.CTkComboBox(
-            gender_cell, values=[], variable=self._gender_var, height=30,
+            gender_cell, values=[], variable=self._gender_var, height=32,
             fg_color=self._c("field"), border_color=self._c("border"),
             button_color=self._c("primary"), button_hover_color=self._c("primary_hover"),
             text_color=self._c("text"), dropdown_fg_color=self._c("surface"),
@@ -1239,38 +1649,168 @@ class App(ctk.CTk):
         self._gender_combo.pack(fill="x")
 
         # 音色 最终列表
+        ctk.CTkLabel(deck, text=self._t("voice"), text_color=self._c("muted"), font=self._font(size=11, weight="bold")).grid(row=4, column=0, sticky="w", padx=18, pady=(5, 2))
         self._voice_var = tk.StringVar(value=self._display_name(self._selected_voice_code))
-        self._voice_combo = ctk.CTkComboBox(
-            deck, values=[self._voice_var.get()], variable=self._voice_var, height=32,
-            fg_color=self._c("field"), border_color=self._c("border"),
-            button_color=self._c("primary"), button_hover_color=self._c("primary_hover"),
-            text_color=self._c("text"), dropdown_fg_color=self._c("surface"),
-            dropdown_hover_color=self._c("card_raised"),
-            font=self._font(size=13), dropdown_font=self._font(size=13),
+        self._voice_combo = VoicePicker(
+            deck,
+            values=[self._voice_var.get()],
             command=self._on_voice_changed,
+            is_favorite=self._is_display_favorite,
+            on_toggle_favorite=self._toggle_favorite_for_display,
+            font=self._font(size=12),
+            text_color=self._c("text"),
+            muted_color=self._c("muted"),
+            field_color=self._c("field"),
+            border_color=self._c("border"),
+            popup_color=self._c("surface"),
+            hover_color=self._c("card_raised"),
+            accent_color=self._c("primary"),
+            star_color=self._c("warning"),
         )
-        self._voice_combo.grid(row=2, column=0, sticky="ew", padx=18, pady=(6, 5))
+        self._voice_combo.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 5))
+
+        voice_filter = ctk.CTkFrame(deck, fg_color="transparent")
+        voice_filter.grid(row=6, column=0, sticky="ew", padx=18, pady=(0, 5))
+        voice_filter.grid_columnconfigure(0, weight=1)
+        self._voice_search_entry = ctk.CTkEntry(
+            voice_filter,
+            placeholder_text=self._t("voice_search"),
+            height=32,
+            fg_color=self._c("field"),
+            border_color=self._c("border"),
+            text_color=self._c("text"),
+            placeholder_text_color=self._c("muted"),
+            font=self._font(size=12),
+        )
+        if self._voice_query:
+            self._voice_search_entry.insert(0, self._voice_query)
+        self._voice_search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._voice_search_entry._entry.bind(
+            "<KeyRelease>", self._schedule_voice_filter
+        )
+        self._voice_search_entry._entry.bind("<Escape>", self._clear_voice_query)
+        self._btn_voice_preview = ctk.CTkButton(
+            voice_filter,
+            text=self._t("voice_preview"),
+            width=110,
+            height=32,
+            font=self._font(size=11, weight="bold"),
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("accent"),
+            command=self._toggle_voice_preview,
+        )
+        self._btn_voice_preview.grid(row=0, column=1)
+
+        self._favorites_toggle = ctk.CTkCheckBox(
+            voice_header,
+            text=self._favorite_filter_text(),
+            variable=tk.BooleanVar(value=self._favorites_only),
+            command=self._toggle_favorites_view,
+            font=self._font(size=11),
+            text_color=self._c("muted"),
+            border_color=self._c("border"),
+            hover_color=self._c("card_raised"),
+            fg_color=self._c("primary"),
+            checkbox_width=18,
+            checkbox_height=18,
+            border_width=2,
+        )
+        self._favorites_toggle.grid(row=0, column=1, sticky="e")
 
         voice_details = ctk.CTkFrame(deck, fg_color="transparent")
-        voice_details.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 3))
+        voice_details.grid(row=7, column=0, sticky="ew", padx=18, pady=(0, 3))
         voice_details.grid_columnconfigure(0, weight=1)
-        self._voice_info = ctk.CTkLabel(voice_details, text="", text_color=self._c("muted"), anchor="w", font=self._font(size=11))
-        self._voice_info.grid(row=0, column=0, sticky="ew")
-        self._btn_reload_voices = ctk.CTkButton(voice_details, text="↻", width=34, height=28, font=self._font(size=13, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), state="disabled", command=self._retry_load_voices)
-        self._btn_reload_voices.grid(row=0, column=1, padx=(8, 0))
-        ctk.CTkButton(voice_details, text=self._t("restore"), width=118, height=28, font=self._font(size=12), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._restore_default_settings).grid(row=0, column=2, padx=(8, 0))
+        voice_details.grid_columnconfigure(1, weight=0)
+        voice_details.grid_columnconfigure(2, weight=0)
+        self._voice_info = ctk.CTkLabel(
+            voice_details,
+            text="",
+            text_color=self._c("muted"),
+            anchor="w",
+            justify="left",
+            wraplength=330,
+            font=self._font(size=11),
+        )
+        self._voice_info.grid(row=0, column=0, columnspan=3, sticky="ew")
+        actions = ctk.CTkFrame(voice_details, fg_color="transparent")
+        actions.grid(row=1, column=0, columnspan=3, pady=(2, 0), sticky="e")
+        self._btn_reload_voices = ctk.CTkButton(
+            actions,
+            text=self._t("reload_voices"),
+            width=106,
+            height=28,
+            font=self._font(size=10),
+            fg_color=self._c("surface_alt"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("accent"),
+            state="disabled",
+            command=self._retry_load_voices,
+        )
+        self._btn_restore_defaults = ctk.CTkButton(actions, text=self._t("restore"), width=96, height=28, font=self._font(size=10), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._restore_default_settings)
+        self._btn_restore_defaults.pack(side="left")
 
         # 当前模式的音频设置统一放在右侧，避免顶部内容操作互相挤压。
         mode_settings = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"), border_width=1, border_color=self._c("border"))
-        mode_settings.grid(row=4, column=0, sticky="ew", padx=18, pady=(4, 6))
+        mode_settings.grid(row=8, column=0, sticky="ew", padx=18, pady=(4, 6))
         mode_settings.grid_columnconfigure(0, weight=1)
-        self._mode_settings_title = ctk.CTkLabel(mode_settings, text="", text_color=self._c("text"), anchor="w", font=self._font(size=14, weight="bold"))
-        self._mode_settings_title.grid(row=0, column=0, sticky="w", padx=14, pady=(11, 0))
-        self._mode_settings_hint = ctk.CTkLabel(mode_settings, text="", text_color=self._c("muted"), anchor="w", justify="left", wraplength=315, font=self._font(size=11))
-        self._mode_settings_hint.grid(row=1, column=0, sticky="ew", padx=14, pady=(2, 7))
+        header = ctk.CTkFrame(mode_settings, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=10, pady=(7, 4))
+        header.grid_columnconfigure(0, weight=1)
+        self._mode_settings_title = ctk.CTkLabel(header, text="", text_color=self._c("text"), anchor="w", font=self._font(size=12, weight="bold"))
+        self._mode_settings_title.grid(row=0, column=0, sticky="w")
+        self._mode_settings_expand = ctk.CTkButton(
+            header,
+            text=self._t("expand"),
+            width=58,
+            height=24,
+            font=self._font(size=10, weight="bold"),
+            fg_color=self._c("field"),
+            hover_color=self._c("card_raised"),
+            border_width=1,
+            border_color=self._c("border"),
+            text_color=self._c("accent"),
+            command=self._toggle_mode_settings,
+        )
+        self._mode_settings_expand.grid(row=0, column=1, sticky="e")
+        self._mode_settings_title.bind(
+            "<Button-1>", lambda _event: self._toggle_mode_settings()
+        )
+        self._mode_settings_title.configure(cursor="hand2")
 
-        pause_row = ctk.CTkFrame(mode_settings, fg_color="transparent")
-        pause_row.grid(row=2, column=0, sticky="ew", padx=14)
+        body = ctk.CTkFrame(mode_settings, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="ew")
+        body.grid_columnconfigure(0, weight=1)
+        self._mode_settings_body = body
+        parameters = ctk.CTkFrame(
+            body,
+            corner_radius=0,
+            fg_color=self._c("card"),
+        )
+        for column in range(3):
+            parameters.grid_columnconfigure(column, weight=1, uniform="voice_control")
+        parameters.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 6))
+        self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
+        self._volume_var = tk.IntVar(value=getattr(self, "_volume_value", DEFAULT_VOLUME))
+        self._pitch_var = tk.IntVar(value=getattr(self, "_pitch_value", DEFAULT_PITCH))
+        self._add_slider_card(
+            parameters, 0, self._t("rate"), self._rate_var, -50, 100, self._fmt_rate
+        )
+        self._add_slider_card(
+            parameters, 1, self._t("volume"), self._volume_var, -50, 100, self._fmt_volume
+        )
+        self._pitch_slider = self._add_slider_card(
+            parameters, 2, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch
+        )
+        self._mode_settings_hint = ctk.CTkLabel(body, text="", text_color=self._c("muted"), anchor="w", justify="left", wraplength=290, font=self._font(size=10))
+        self._mode_settings_hint.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 5))
+
+        pause_row = ctk.CTkFrame(body, fg_color="transparent")
+        pause_row.grid(row=2, column=0, sticky="ew", padx=4)
         pause_row.grid_columnconfigure(0, weight=1)
         self._sentence_pause_row = pause_row
         self._sentence_pause_check = ctk.CTkCheckBox(
@@ -1336,8 +1876,8 @@ class App(ctk.CTk):
             self._punctuation_checks[key] = (var, marks, check)
         self._set_sentence_pause_controls_enabled(self._sentence_pause_enabled)
 
-        self._line_pause_section = ctk.CTkFrame(mode_settings, fg_color=self._c("field"), corner_radius=8, border_width=1, border_color=self._c("border"))
-        self._line_pause_section.grid(row=3, column=0, sticky="ew", padx=14, pady=(9, 4))
+        self._line_pause_section = ctk.CTkFrame(body, fg_color=self._c("field"), corner_radius=8, border_width=1, border_color=self._c("border"))
+        self._line_pause_section.grid(row=3, column=0, sticky="ew", padx=4, pady=(9, 4))
         self._line_pause_section.grid_columnconfigure(0, weight=1)
         self._line_pause_check = ctk.CTkCheckBox(self._line_pause_section, text=self._t("line_pause_enable"), variable=tk.BooleanVar(value=self._line_pause_enabled), command=self._toggle_line_pause, font=self._font(size=11, weight="bold"), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
         self._line_pause_check.grid(row=0, column=0, sticky="w", padx=10, pady=(7, 0))
@@ -1361,21 +1901,21 @@ class App(ctk.CTk):
         ).grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 7))
         self._set_line_pause_controls_enabled(self._line_pause_enabled)
 
-        timeline_row = ctk.CTkFrame(mode_settings, fg_color="transparent")
-        timeline_row.grid(row=4, column=0, sticky="ew", padx=14)
+        timeline_row = ctk.CTkFrame(body, fg_color="transparent")
+        timeline_row.grid(row=4, column=0, sticky="ew", padx=4)
         self._timeline_var = tk.BooleanVar(value=self._timeline_enabled)
         self._timeline_check = ctk.CTkCheckBox(timeline_row, text=self._t("timeline"), variable=self._timeline_var, command=self._toggle_timeline, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
         self._timeline_check.pack(side="left")
         ctk.CTkButton(timeline_row, text=" ? ", width=30, height=24, font=self._font(size=12, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"), command=self._show_timeline_help).pack(side="left", padx=(6, 0))
 
         self._srt_var = tk.BooleanVar(value=self._srt_enabled)
-        self._srt_check = ctk.CTkCheckBox(mode_settings, text=self._t("srt_subtitles"), variable=self._srt_var, command=self._toggle_srt, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
-        self._srt_check.grid(row=5, column=0, sticky="w", padx=14, pady=(4, 4))
+        self._srt_check = ctk.CTkCheckBox(body, text=self._t("srt_subtitles"), variable=self._srt_var, command=self._toggle_srt, font=self._font(size=12), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=20, checkbox_height=20, border_width=2)
+        self._srt_check.grid(row=5, column=0, sticky="w", padx=4, pady=(4, 4))
         self._srt_fill_var = tk.BooleanVar(value=self._srt_fill_line_pause)
-        self._srt_fill_check = ctk.CTkCheckBox(mode_settings, text=self._t("srt_fill_line_pause"), variable=self._srt_fill_var, command=self._toggle_srt_fill, font=self._font(size=11), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=18, checkbox_height=18, border_width=2)
-        self._srt_fill_check.grid(row=6, column=0, sticky="w", padx=32, pady=(0, 3))
+        self._srt_fill_check = ctk.CTkCheckBox(body, text=self._t("srt_fill_line_pause"), variable=self._srt_fill_var, command=self._toggle_srt_fill, font=self._font(size=11), text_color=self._c("text"), border_color=self._c("border"), hover_color=self._c("card_raised"), fg_color=self._c("primary"), checkbox_width=18, checkbox_height=18, border_width=2)
+        self._srt_fill_check.grid(row=6, column=0, sticky="w", padx=22, pady=(0, 3))
         self._srt_fill_hint = ctk.CTkLabel(
-            mode_settings,
+            body,
             text=self._t("srt_fill_line_pause_hint"),
             text_color=self._c("muted"),
             anchor="w",
@@ -1383,22 +1923,13 @@ class App(ctk.CTk):
             wraplength=280,
             font=self._font(size=10),
         )
-        self._srt_fill_hint.grid(row=7, column=0, sticky="ew", padx=(32, 14), pady=(0, 10))
+        self._srt_fill_hint.grid(row=7, column=0, sticky="ew", padx=(22, 4), pady=(0, 8))
         # Keep the hint wrapped inside the panel instead of letting a fixed
         # wraplength push text past the frame edge on narrow windows.
         mode_settings.bind("<Configure>", self._on_mode_settings_resize, add="+")
+        body.grid_remove()
         self._update_srt_fill_visibility()
-
-        parameters = ctk.CTkFrame(deck, corner_radius=12, fg_color=self._c("surface_alt"))
-        parameters.grid(row=5, column=0, sticky="ew", padx=18, pady=(0, 5))
-        for column in range(3):
-            parameters.grid_columnconfigure(column, weight=1, uniform="voice_control")
-        self._rate_var = tk.IntVar(value=getattr(self, "_rate_value", DEFAULT_RATE))
-        self._volume_var = tk.IntVar(value=getattr(self, "_volume_value", DEFAULT_VOLUME))
-        self._pitch_var = tk.IntVar(value=getattr(self, "_pitch_value", DEFAULT_PITCH))
-        self._add_slider_card(parameters, 0, self._t("rate"), self._rate_var, -50, 100, self._fmt_rate)
-        self._add_slider_card(parameters, 1, self._t("volume"), self._volume_var, -50, 100, self._fmt_volume)
-        self._add_slider_card(parameters, 2, self._t("pitch"), self._pitch_var, -20, 20, self._fmt_pitch)
+        self._sync_mode_settings_visibility()
 
         status_row = ctk.CTkFrame(deck_footer, fg_color="transparent")
         status_row.grid(row=1, column=0, sticky="ew", padx=18, pady=(8, 3))
@@ -1435,13 +1966,18 @@ class App(ctk.CTk):
         self._btn_generate.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         self._btn_dub_pages = ctk.CTkButton(actions, text=self._t("page_dub"), command=self._on_dub_pages, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"))
         self._btn_dub_pages.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        self._btn_play = ctk.CTkButton(actions, text=self._t("play"), command=self._on_play, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
-        self._btn_play.grid(row=2, column=0, sticky="ew", padx=(0, 4))
-        self._btn_save = ctk.CTkButton(actions, text=self._t("save"), command=self._on_save, height=32, font=self._font(size=12, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"))
-        self._btn_save.grid(row=2, column=1, sticky="ew", padx=(4, 0))
-        self._btn_result_preview = ctk.CTkButton(actions, text=self._t("result_preview"), command=self._open_result_preview, height=30, font=self._font(size=12, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"))
-        self._btn_result_preview.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        # Secondary actions share one row.  The four-line footer made the voice
+        # section almost invisible at the minimum supported window height.
+        self._btn_play = ctk.CTkButton(actions, text=self._t("play"), command=self._on_play, width=72, height=30, font=self._font(size=11, weight="bold"), fg_color=self._c("surface_alt"), hover_color=self._c("border"), text_color=self._c("text"))
+        self._btn_play.grid(row=2, column=0, sticky="ew", padx=(0, 3))
+        self._btn_save = ctk.CTkButton(actions, text=self._t("save"), command=self._on_save, width=80, height=30, font=self._font(size=11, weight="bold"), fg_color=self._c("star"), hover_color=self._c("star_hover"), border_width=1, border_color=self._c("warning"), text_color=self._c("warning"))
+        self._btn_save.grid(row=2, column=1, sticky="ew", padx=(0, 3))
+        self._btn_result_preview = ctk.CTkButton(actions, text=self._t("result_short"), command=self._open_result_preview, width=52, height=30, font=self._font(size=11, weight="bold"), fg_color="transparent", hover_color=self._c("card_raised"), border_width=1, border_color=self._c("border"), text_color=self._c("accent"))
+        self._btn_result_preview.grid(row=2, column=2, sticky="ew")
+        actions.grid_columnconfigure(2, weight=0)
         self._configure_highlight_tag()
+        self._update_provider_ui()
+        self._sync_voice_preview_button()
         self._sync_generated_status()
         self._update_generated_buttons()
         self._update_voice_info()
@@ -1450,17 +1986,21 @@ class App(ctk.CTk):
 
     def _add_slider_card(self, master, column, label, variable, minimum, maximum, formatter):
         card = ctk.CTkFrame(master, fg_color="transparent")
-        card.grid(row=0, column=column, sticky="ew", padx=6, pady=5)
+        card.grid(row=0, column=column, sticky="ew", padx=6, pady=(3, 2))
         card.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(card, text=label, text_color=self._c("muted"), anchor="w", font=self._font(size=11, weight="bold")).grid(row=0, column=0, sticky="w")
-        value_label = ctk.CTkLabel(card, text=formatter(variable.get()), text_color=self._c("accent"), anchor="e", font=self._font(size=11, weight="bold"))
-        value_label.grid(row=1, column=0, sticky="ew", pady=(1, 1))
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(header, text=label, text_color=self._c("muted"), anchor="w", font=self._font(size=10, weight="bold")).grid(row=0, column=0, sticky="w")
+        value_label = ctk.CTkLabel(header, text=formatter(variable.get()), text_color=self._c("accent"), anchor="e", font=self._font(size=10, weight="bold"))
+        value_label.grid(row=0, column=1, sticky="e")
         def _on_slider_change(value):
             value_label.configure(text=formatter(value))
             self._on_file_item_control_changed()
 
-        slider = ctk.CTkSlider(card, height=14, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=_on_slider_change)
-        slider.grid(row=2, column=0, sticky="ew")
+        slider = ctk.CTkSlider(card, height=12, from_=minimum, to=maximum, variable=variable, button_color=self._c("primary"), button_hover_color=self._c("primary_hover"), progress_color=self._c("primary"), fg_color=self._c("border"), command=_on_slider_change)
+        slider.grid(row=1, column=0, sticky="ew")
+        return slider
 
     def _fmt_rate(self, value):
         return f"{'+' if value >= 0 else ''}{int(value)}%"
@@ -1476,7 +2016,9 @@ class App(ctk.CTk):
         log_frame.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 8))
         log_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(log_frame, text=self._t("log"), text_color=self._c("text"), font=self._font(size=13, weight="bold")).grid(row=0, column=0, sticky="w", padx=16, pady=(9, 2))
-        self._log = ctk.CTkTextbox(log_frame, height=72, corner_radius=12, fg_color=self._c("log"), text_color=self._c("text"), border_width=0, font=self._font(size=12))
+        # Keep enough inner height that the newest two lines are never
+        # clipped by the rounded canvas when the view is scrolled to the end.
+        self._log = ctk.CTkTextbox(log_frame, height=92, corner_radius=10, fg_color=self._c("log"), text_color=self._c("text"), border_width=0, font=self._font(size=12), spacing1=2, spacing3=2)
         self._log.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
         self._log.configure(state="disabled")
 
@@ -1506,7 +2048,7 @@ class App(ctk.CTk):
                 args=(False,),
                 daemon=True,
             ).start()
-        self.after(150, self._poll_ui)
+        self._schedule_poll_ui()
 
     def _load_voices(self):
         proxy = detect_proxy()
@@ -1543,7 +2085,19 @@ class App(ctk.CTk):
 
     # ============================================================ UI 轮询
 
+    def _schedule_poll_ui(self, delay=None):
+        if self._poll_after is not None:
+            return
+        if delay is None:
+            busy = self._busy or self._voice_preview_state in (
+                "generating",
+                "playing",
+            )
+            delay = 100 if busy else 400
+        self._poll_after = self.after(delay, self._poll_ui)
+
     def _poll_ui(self):
+        self._poll_after = None
         try:
             while True:
                 item = self._ui_q.get_nowait()
@@ -1551,7 +2105,7 @@ class App(ctk.CTk):
         except queue.Empty:
             pass
 
-        self.after(150, self._poll_ui)
+        self._schedule_poll_ui()
 
     def _handle_ui_message(self, item):
         kind = item[0]
@@ -1561,6 +2115,12 @@ class App(ctk.CTk):
         elif kind == "voices":
             voices, err = item[1], item[2]
             self._apply_voices(voices, err)
+        elif kind == "voice_preview_done":
+            self._handle_voice_preview_done(item[1], item[2], item[3])
+        elif kind == "local_download_progress":
+            self._on_local_download_progress(item[1], item[2])
+        elif kind == "local_download_done":
+            self._on_local_download_done(item[1], item[2])
         elif kind == "update_result":
             self._apply_update_result(item[1], item[2])
         elif kind == "log":
@@ -1753,11 +2313,16 @@ class App(ctk.CTk):
     # ============================================================ 语音
 
     def _display_name(self, code: str) -> str:
+        local = local_voice(code)
+        if local is not None:
+            return local.label(self._language)
         info = self._voice_map.get(code)
         if info:
             if self._language == "zh":
                 name = self._localized_voice_name(code)
-                locale = self._localized_locale(info.get("Locale", ""))
+                locale = self._localized_locale(
+                    info.get("EdgeLocale") or info.get("Locale", "")
+                )
                 gender = self._localized_gender(info.get("Gender", ""))
                 return f"{name} · {locale} · {gender}（{code}）"
             friendly = info.get("FriendlyName") or code
@@ -1765,9 +2330,12 @@ class App(ctk.CTk):
         return code
 
     def _on_language_changed(self, value):
+        if self._voice_provider == PROVIDER_KOKORO:
+            return
         code = self._lang_map.get(value)
         if not code or code == self._selected_lang:
             return
+        self._stop_voice_preview()
         self._selected_lang = code
         self._refresh_voice_selectors()
         self._on_file_item_control_changed()
@@ -1776,16 +2344,40 @@ class App(ctk.CTk):
         key = self._gender_map.get(value)
         if not key or key == self._selected_gender:
             return
+        self._stop_voice_preview()
         self._selected_gender = key
         self._refresh_voice_selectors()
         self._on_file_item_control_changed()
 
     def _on_voice_changed(self, value):
-        for code in list(self._voice_map):
+        self._voice_var.set(value)
+        if self._voice_preview_state in ("generating", "playing"):
+            self._stop_voice_preview()
+        for code in list(self._voice_map) + [voice.code for voice in LOCAL_VOICES]:
             if self._display_name(code) == value:
                 self._selected_voice_code = code
                 break
         else:
+            return
+        if self._voice_provider == PROVIDER_KOKORO:
+            selected = local_voice(self._selected_voice_code)
+            if selected is not None and selected.gender != self._selected_gender:
+                if self._selected_gender != GENDER_ALL:
+                    self._selected_gender = selected.gender
+                    label = next(
+                        (
+                            key
+                            for key, value in self._gender_map.items()
+                            if value == self._selected_gender
+                        ),
+                        "",
+                    )
+                    if label:
+                        self._gender_var.set(label)
+            self._update_voice_info()
+            self._sync_favorite_controls()
+            self._on_file_item_control_changed()
+            self._sync_voice_preview_button()
             return
         if self._groups_engine is not None:
             actual = self._groups_engine.voice_gender(self._selected_voice_code)
@@ -1796,16 +2388,80 @@ class App(ctk.CTk):
                 if label:
                     self._gender_var.set(label)
         self._update_voice_info()
+        self._sync_favorite_controls()
         self._on_file_item_control_changed()
+        self._sync_voice_preview_button()
+
+    def _schedule_voice_filter(self, _event=None):
+        if self._voice_filter_after is not None:
+            try:
+                self.after_cancel(self._voice_filter_after)
+            except tk.TclError:
+                pass
+        self._voice_filter_after = self.after(160, self._apply_voice_filter)
+
+    def _apply_voice_filter(self):
+        self._voice_filter_after = None
+        entry = getattr(self, "_voice_search_entry", None)
+        if entry is None:
+            return
+        if getattr(entry, "_placeholder_text_active", False):
+            return
+        query = entry.get().strip()
+        if query == self._voice_query:
+            return
+        self._stop_voice_preview()
+        self._voice_query = query
+        self._refresh_voice_selectors()
+
+    def _clear_voice_query(self, _event=None):
+        entry = getattr(self, "_voice_search_entry", None)
+        if entry is None:
+            return "break"
+        self._stop_voice_preview()
+        if self._voice_query:
+            self._voice_query = ""
+            self._refresh_voice_selectors()
+        entry.delete(0, "end")
+        return "break"
+
+    def _voice_matches_query(self, info: dict, query: str) -> bool:
+        if not query:
+            return True
+        code = str(info.get("ShortName") or "")
+        locale = str(info.get("EdgeLocale") or info.get("Locale") or "")
+        haystack = " ".join(
+            (
+                code,
+                self._display_name(code),
+                str(info.get("FriendlyName") or ""),
+                self._localized_locale(locale),
+                locale,
+            )
+        ).lower()
+        return all(token in haystack for token in query.lower().split())
 
     def _restore_default_settings(self):
+        self._stop_voice_preview()
+        self._favorites_only = False
+        toggle = getattr(self, "_favorites_toggle", None)
+        if toggle is not None:
+            toggle.deselect()
+        self._voice_provider = PROVIDER_EDGE
         self._selected_voice_code = DEFAULT_VOICE
         self._selected_lang = "en"
         self._selected_gender = "Male"
+        self._voice_query = ""
+        self._set_deck_width(375)
+        if getattr(self, "_voice_search_entry", None) is not None:
+            self._voice_search_entry.delete(0, "end")
         self._rate_var.set(DEFAULT_RATE)
         self._volume_var.set(DEFAULT_VOLUME)
         self._pitch_var.set(DEFAULT_PITCH)
         self._refresh_voice_selectors(preferred=DEFAULT_VOICE)
+        if getattr(self, "_provider_switch", None) is not None:
+            self._provider_var.set(self._provider_label(PROVIDER_EDGE))
+        self._update_provider_ui()
         self._on_file_item_control_changed()
         self._update_voice_info()
         if not self._file_batch_active:
@@ -1814,7 +2470,7 @@ class App(ctk.CTk):
 
     def _selected_voice(self) -> str:
         value = self._voice_var.get()
-        for code in self._voice_map:
+        for code in list(self._voice_map) + [voice.code for voice in LOCAL_VOICES]:
             if self._display_name(code) == value:
                 self._selected_voice_code = code
                 return code
@@ -1822,11 +2478,35 @@ class App(ctk.CTk):
 
     def _update_voice_info(self):
         code = self._selected_voice()
+        if self._voice_provider == PROVIDER_KOKORO:
+            selected = local_voice(code)
+            if selected is not None:
+                details = (
+                    f"中文 · {'女声' if selected.gender == GENDER_FEMALE else '男声'}"
+                    if self._language == "zh"
+                    else f"Chinese · {selected.gender}"
+                )
+                if not self._local_model_ready:
+                    details = self._t("local_not_installed")
+                else:
+                    details += " · " + self._t("local_subtitle_off")
+                self._voice_info.configure(text=details, text_color=self._c("muted"))
+                return
         info = self._voice_map.get(code)
         if info:
-            locale = self._localized_locale(info.get("Locale", ""))
+            locale = self._localized_locale(
+                info.get("EdgeLocale") or info.get("Locale", "")
+            )
             gender = self._localized_gender(info.get("Gender", ""))
-            self._voice_info.configure(text=f"{locale} · {gender}")
+            details = f"{locale} · {gender}"
+            if code in MULTILINGUAL_NAMES_ZH:
+                details = f"{details} · {self._t('voice_multilingual')}"
+            if self._voice_filtered_count:
+                key = "voice_count" if self._voice_query else "voice_total"
+                details = (
+                    self._t(key, count=self._voice_filtered_count) + " · " + details
+                )
+            self._voice_info.configure(text=details, text_color=self._c("muted"))
         else:
             self._voice_info.configure(text="")
 
@@ -1844,6 +2524,89 @@ class App(ctk.CTk):
             return f"{self.LANGUAGE_NAMES_ZH.get(code, code)}（{code}）"
         return code.capitalize() if code.islower() else code
 
+    def _favorite_available_count(self) -> int:
+        if self._voice_provider == PROVIDER_KOKORO:
+            available = {voice.code for voice in LOCAL_VOICES}
+        else:
+            available = {
+                code for code in self._voice_map if not is_local_voice(code)
+            }
+        return len(filter_favorites(self._favorites, available))
+
+    def _favorite_filter_text(self) -> str:
+        count = self._favorite_available_count()
+        if count:
+            return f"{self._t('voice_favorites_filter')} · {count}"
+        return self._t("voice_favorites_filter")
+
+    def _sync_favorite_controls(self):
+        code = self._selected_voice_code
+        picker = getattr(self, "_voice_combo", None)
+        if picker is not None and hasattr(picker, "set_favorites"):
+            if hasattr(picker, "set_favorite_values"):
+                picker.set_favorite_values(
+                    {
+                        self._display_name(code)
+                        for code in self._favorites
+                        if local_voice(code) is not None
+                        or code in self._voice_map
+                    }
+                )
+            picker.set_favorites()
+            picker.set(self._voice_var.get())
+        toggle = getattr(self, "_favorites_toggle", None)
+        if toggle is not None:
+            toggle.configure(
+                text=self._favorite_filter_text(),
+                text_color=(
+                    self._c("warning")
+                    if self._favorites_only
+                    else self._c("muted")
+                ),
+            )
+
+    def _voice_code_for_display(self, value: str) -> str:
+        for code in list(self._voice_map) + [
+            voice.code for voice in LOCAL_VOICES
+        ]:
+            if self._display_name(code) == value:
+                return code
+        return ""
+
+    def _is_display_favorite(self, value: str) -> bool:
+        code = self._voice_code_for_display(value)
+        return bool(code and code in self._favorites)
+
+    def _toggle_favorite_for_display(self, value: str):
+        self._toggle_favorite_code(self._voice_code_for_display(value))
+
+    def _toggle_favorite_code(self, code: str):
+        if not code:
+            return
+        self._favorites = toggle_favorite(self._favorites, code)
+        self._settings["voice_favorites"] = list(self._favorites)
+        self._save_settings()
+        # Removing a voice while “Saved only” is active must narrow the list
+        # immediately.  The export voice stays selected if it is still shown;
+        # otherwise the picker advances to the first remaining saved voice.
+        if self._favorites_only:
+            self._refresh_voice_selectors(preferred=code)
+        else:
+            self._sync_favorite_controls()
+
+    def _toggle_favorites_view(self):
+        toggle = getattr(self, "_favorites_toggle", None)
+        if toggle is not None:
+            self._favorites_only = bool(toggle.get())
+        else:
+            self._favorites_only = not self._favorites_only
+        # Saved voices are an additional filter, not a separate screen.  The
+        # language and gender pickers stay usable so the list narrows the same
+        # way it does for the full catalogue.
+        self._refresh_voice_selectors(preferred=self._selected_voice())
+        self._update_provider_ui()
+        self._sync_favorite_controls()
+
     def _retry_load_voices(self):
         if self._btn_reload_voices:
             self._btn_reload_voices.configure(state="disabled")
@@ -1854,6 +2617,12 @@ class App(ctk.CTk):
 
     def _refresh_voice_selectors(self, preferred: Optional[str] = None):
         """重建 语言 → 性别 → 音色 三级下拉（本地分组，无远端请求）。"""
+        if self._favorites_only:
+            self._refresh_saved_voice_selectors(preferred)
+            return
+        if self._voice_provider == PROVIDER_KOKORO:
+            self._refresh_local_selectors(preferred)
+            return
         engine = self._groups_engine
         if engine is None:
             self._refresh_voice_fallback()
@@ -1888,8 +2657,37 @@ class App(ctk.CTk):
             self._selected_lang,
             None if self._selected_gender == GENDER_ALL else self._selected_gender,
         )
+        voices = [v for v in voices if self._voice_matches_query(v, self._voice_query)]
+        self._voice_filtered_count = len(voices)
         codes = [v.get("ShortName") for v in voices]
         target = preferred or self._selected_voice_code
+        if target not in codes and self._voice_query:
+            # A search narrows the dropdown; keep the current voice selected
+            # instead of silently switching it just because it was filtered out.
+            current = next(
+                (
+                    v.get("ShortName")
+                    for v in engine.voices(
+                        self._selected_lang,
+                        None if self._selected_gender == GENDER_ALL else self._selected_gender,
+                    )
+                    if v.get("ShortName") == target
+                ),
+                None,
+            )
+            if current:
+                names = [self._display_name(c) for c in codes]
+                current_name = self._display_name(current)
+                self._voice_combo.configure(
+                    values=names or [current_name]
+                )
+                self._voice_combo.set(current_name)
+                self._voice_var.set(current_name)
+                self._selected_voice_code = target
+                self._update_voice_info()
+                self._sync_voice_preview_button()
+                self._sync_favorite_controls()
+                return
         if target not in codes:
             if self._selected_lang == "en" and DEFAULT_VOICE in codes:
                 target = DEFAULT_VOICE
@@ -1897,9 +2695,525 @@ class App(ctk.CTk):
                 target = codes[0] if codes else self._selected_voice_code
         self._selected_voice_code = target
         names = [self._display_name(c) for c in codes]
-        self._voice_combo.configure(values=names)
-        self._voice_var.set(self._display_name(target) if names else "")
+        target_name = (
+            self._display_name(target)
+            if names
+            else self._display_name(self._selected_voice_code)
+        )
+        self._voice_combo.configure(
+            values=names or [target_name]
+        )
+        self._voice_combo.set(target_name)
+        self._voice_var.set(target_name)
         self._update_voice_info()
+        self._sync_voice_preview_button()
+        self._sync_favorite_controls()
+        if self._voice_query and not voices:
+            self._voice_info.configure(
+                text=self._t("voice_no_match"), text_color=self._c("warning")
+            )
+
+    def _saved_voice_codes(self, language: str = "", gender: str = "") -> list[str]:
+        """Saved codes from the active provider, optionally narrowed."""
+        if self._voice_provider == PROVIDER_KOKORO:
+            available = {voice.code for voice in LOCAL_VOICES}
+        else:
+            available = {
+                code for code in self._voice_map if not is_local_voice(code)
+            }
+        codes = filter_favorites(self._favorites, available)
+        result = []
+        for code in codes:
+            local = local_voice(code)
+            if local is not None:
+                item_language = "zh"
+                item_gender = local.gender
+            else:
+                info = self._voice_map.get(code) or {}
+                item_language = str(
+                    info.get("EdgeLocale") or info.get("Locale") or ""
+                ).split("-", 1)[0].lower()
+                item_gender = str(info.get("Gender") or GENDER_OTHER)
+            if language and item_language != language:
+                continue
+            if gender and gender != GENDER_ALL and item_gender != gender:
+                continue
+            info = self._voice_map.get(code) or {}
+            if not self._voice_matches_query(info, self._voice_query) and not (
+                local is not None
+                and all(
+                    token
+                    in " ".join(
+                        (
+                            local.code,
+                            local.name_zh,
+                            local.name_en,
+                            local.style_zh,
+                            local.style_en,
+                        )
+                    ).lower()
+                    for token in self._voice_query.lower().split()
+                )
+            ):
+                continue
+            result.append(code)
+        return result
+
+    def _refresh_saved_voice_selectors(self, preferred: Optional[str] = None):
+        """Apply the saved-only filter without forking the picker UI."""
+        if self._voice_provider == PROVIDER_KOKORO:
+            return self._refresh_local_selectors(preferred)
+        engine = self._groups_engine
+        if engine is None:
+            return self._refresh_voice_fallback()
+        languages = {
+            str(
+                (self._voice_map.get(code) or {}).get("EdgeLocale")
+                or (self._voice_map.get(code) or {}).get("Locale")
+                or ""
+            ).split("-", 1)[0].lower()
+            for code in filter_favorites(
+                self._favorites,
+                {c for c in self._voice_map if not is_local_voice(c)},
+            )
+        }
+        if not languages:
+            self._refresh_empty_saved_selectors()
+            return
+        if self._selected_lang not in languages:
+            self._selected_lang = sorted(languages)[0]
+        ordered = sorted(
+            languages, key=lambda c: ({"zh": 0, "en": 1}.get(c, 2), c)
+        )
+        self._lang_map = {self._localized_lang_name(c): c for c in ordered}
+        self._lang_combo.configure(values=list(self._lang_map), state="normal")
+        self._lang_var.set(
+            next(k for k, v in self._lang_map.items() if v == self._selected_lang)
+        )
+        genders = {
+            str((self._voice_map.get(code) or {}).get("Gender") or GENDER_OTHER)
+            for code in filter_favorites(
+                self._favorites,
+                {c for c in self._voice_map if not is_local_voice(c)},
+            )
+            if str(
+                (self._voice_map.get(code) or {}).get("EdgeLocale")
+                or (self._voice_map.get(code) or {}).get("Locale")
+                or ""
+            ).split("-", 1)[0].lower()
+            == self._selected_lang
+        }
+        gender_opts = [GENDER_ALL] + sorted(genders)
+        self._gender_map = {self._gender_label(g): g for g in gender_opts}
+        if self._selected_gender not in gender_opts:
+            self._selected_gender = GENDER_ALL
+        self._gender_combo.configure(values=list(self._gender_map), state="normal")
+        self._gender_var.set(
+            next(k for k, v in self._gender_map.items() if v == self._selected_gender)
+        )
+        codes = self._saved_voice_codes(self._selected_lang, self._selected_gender)
+        self._voice_filtered_count = len(codes)
+        target = preferred or self._selected_voice_code
+        if target not in codes:
+            target = codes[0] if codes else ""
+        names = [self._display_name(code) for code in codes]
+        target_name = (
+            self._display_name(target)
+            if target
+            else self._display_name(self._selected_voice_code)
+        )
+        self._voice_combo.configure(
+            values=names or [target_name]
+        )
+        self._voice_combo.set(target_name)
+        if target:
+            self._selected_voice_code = target
+        self._voice_var.set(target_name)
+        self._update_voice_info()
+        self._sync_voice_preview_button()
+        self._sync_favorite_controls()
+        if not names:
+            self._voice_info.configure(
+                text=(
+                    self._t("voice_no_match")
+                    if self._voice_query
+                    else self._t("voice_no_favorites")
+                ),
+                text_color=self._c("warning"),
+            )
+
+    def _refresh_empty_saved_selectors(self):
+        self._lang_map = {}
+        self._lang_combo.configure(values=[], state="normal")
+        self._lang_var.set("")
+        self._gender_map = {self._gender_label(GENDER_ALL): GENDER_ALL}
+        self._gender_combo.configure(values=list(self._gender_map), state="normal")
+        self._gender_var.set(self._gender_label(GENDER_ALL))
+        self._voice_filtered_count = 0
+        current_name = self._display_name(self._selected_voice_code)
+        self._voice_combo.configure(
+            values=[current_name]
+        )
+        self._voice_combo.set(current_name)
+        self._voice_var.set(current_name)
+        self._voice_info.configure(
+            text=(
+                self._t("voice_no_match")
+                if self._voice_query
+                else self._t("voice_no_favorites")
+            ),
+            text_color=self._c("warning"),
+        )
+        self._sync_voice_preview_button()
+        self._sync_favorite_controls()
+
+    def _local_status_text(self) -> str:
+        if self._local_model_ready:
+            return self._t("local_ready")
+        if self._local_download_state == "downloading":
+            return self._t("local_downloading", percent=self._local_download_progress)
+        return self._t("local_not_installed") + "\n" + self._t("local_download_hint")
+
+    def _refresh_local_selectors(self, preferred: Optional[str] = None):
+        if not model_installed(self._local_model_dir):
+            # Keep the trigger active so the source can still be changed, but
+            # never offer a voice the engine cannot load.
+            self._voice_combo.configure(
+                values=[self._display_name(LOCAL_VOICES[0].code)],
+                state="normal",
+            )
+            self._voice_combo.set(
+                self._display_name(LOCAL_VOICES[0].code)
+            )
+            self._voice_var.set(
+                self._display_name(LOCAL_VOICES[0].code)
+            )
+            self._voice_info.configure(
+                text=self._t("local_not_installed"),
+                text_color=self._c("warning"),
+            )
+            self._sync_voice_preview_button()
+            self._sync_favorite_controls()
+            self._update_provider_ui()
+            return
+        self._lang_map = {
+            ("中文（zh）" if self._language == "zh" else "Chinese (zh)"): "zh"
+        }
+        self._lang_combo.configure(values=list(self._lang_map))
+        self._lang_var.set(next(iter(self._lang_map)))
+        self._lang_combo.configure(state="disabled")
+
+        gender_opts = [GENDER_ALL, GENDER_FEMALE, GENDER_MALE]
+        self._gender_map = {self._gender_label(key): key for key in gender_opts}
+        if self._selected_gender not in gender_opts:
+            self._selected_gender = GENDER_ALL
+        self._gender_combo.configure(
+            values=list(self._gender_map), state="normal"
+        )
+        self._gender_var.set(
+            next(
+                label
+                for label, value in self._gender_map.items()
+                if value == self._selected_gender
+            )
+        )
+        voices = list(
+            local_voices(
+                ""
+                if self._selected_gender == GENDER_ALL
+                else self._selected_gender
+            )
+        )
+        if self._favorites_only:
+            saved = filter_favorites(
+                self._favorites, {voice.code for voice in LOCAL_VOICES}
+            )
+            voices = [voice for voice in voices if voice.code in saved]
+        query = self._voice_query.lower()
+        if query:
+            voices = [
+                item
+                for item in voices
+                if all(
+                    token
+                    in " ".join(
+                        (
+                            item.code,
+                            item.name_zh,
+                            item.name_en,
+                            item.style_zh,
+                            item.style_en,
+                        )
+                    ).lower()
+                    for token in query.split()
+                )
+            ]
+        self._voice_filtered_count = len(voices)
+        target = preferred or self._selected_voice_code
+        codes = [item.code for item in voices]
+        if target not in codes:
+            if self._favorites_only:
+                # Never switch the export voice to an unsaved voice just
+                # because the current saved filter has no result.
+                target = codes[0] if codes else self._selected_voice_code
+            else:
+                target = next(
+                    (
+                        item.code
+                        for item in LOCAL_VOICES
+                        if item.code == self._selected_voice_code
+                    ),
+                    codes[0] if codes else LOCAL_VOICES[0].code,
+                )
+        self._selected_voice_code = target
+        names = [self._display_name(item.code) for item in voices]
+        current_name = self._display_name(target)
+        self._voice_combo.configure(
+            values=names or [current_name],
+            state="normal",
+        )
+        self._voice_combo.set(current_name)
+        self._voice_var.set(current_name)
+        self._update_voice_info()
+        if self._favorites_only and not voices:
+            self._voice_info.configure(
+                text=(
+                    self._t("voice_no_match")
+                    if self._voice_query
+                    else self._t("voice_no_favorites")
+                ),
+                text_color=self._c("warning"),
+            )
+        self._sync_voice_preview_button()
+        self._sync_favorite_controls()
+        self._update_provider_ui()
+
+    def _sync_provider_name(self, provider: str):
+        if getattr(self, "_provider_var", None) is not None:
+            self._provider_var.set(self._provider_label(provider))
+
+    def _provider_option(self, provider: str) -> str:
+        label = self._t(
+            "provider_local" if provider == PROVIDER_KOKORO else "provider_edge"
+        )
+        detail = self._t(
+            "provider_local_desc" if provider == PROVIDER_KOKORO else "provider_edge_desc"
+        )
+        return f"{label} · {detail}"
+
+    def _provider_label(self, provider: Optional[str] = None) -> str:
+        return self._provider_option(provider or self._voice_provider)
+
+    def _on_provider_changed(self, value):
+        if self._busy:
+            self._sync_provider_name(self._voice_provider)
+            return
+        provider = (
+            PROVIDER_KOKORO
+            if value == self._provider_option(PROVIDER_KOKORO)
+            else PROVIDER_EDGE
+        )
+        if provider == self._voice_provider:
+            if provider == PROVIDER_KOKORO:
+                # A model can be installed or moved while the source is
+                # already selected. Refresh instead of leaving a stale
+                # one-item/unavailable picker behind.
+                self._local_model_ready = model_installed(
+                    self._local_model_dir
+                )
+                self._refresh_voice_selectors(
+                    preferred=self._selected_voice_code
+                )
+            self._update_provider_ui()
+            self._update_voice_info()
+            self._sync_voice_preview_button()
+            self._sync_favorite_controls()
+            return
+        self._stop_voice_preview()
+        self._stop_playback()
+        if provider == PROVIDER_KOKORO and not model_installed(
+            self._local_model_dir
+        ):
+            # Opening the source is also the discovery path for the optional
+            # download; do not leave a stale disabled picker behind.
+            self._local_model_ready = False
+        elif provider == PROVIDER_KOKORO:
+            self._local_model_ready = True
+        self._voice_provider = provider
+        self._voice_query = ""
+        if getattr(self, "_voice_search_entry", None) is not None:
+            self._voice_search_entry.delete(0, "end")
+        if provider == PROVIDER_KOKORO:
+            self._selected_voice_code = LOCAL_VOICES[0].code
+            self._selected_lang = "zh"
+            self._selected_gender = LOCAL_VOICES[0].gender
+            self._pitch_var.set(DEFAULT_PITCH)
+        else:
+            self._selected_voice_code = DEFAULT_VOICE
+            self._selected_lang = "en"
+            self._selected_gender = GENDER_MALE
+        self._refresh_voice_selectors()
+        if not self._file_batch_active:
+            self._invalidate_generated()
+        self._update_provider_ui()
+        self._sync_favorite_controls()
+        self._on_file_item_control_changed()
+        if not self._file_batch_active:
+            self._persist_ui_settings()
+
+    def _update_provider_ui(self):
+        local = self._voice_provider == PROVIDER_KOKORO
+        panel = getattr(self, "_local_panel", None)
+        if panel is not None:
+            # An empty CTkFrame keeps its configured 200px height, so the
+            # installed-state panel must disappear entirely instead of hiding
+            # only its children; otherwise it pushes the voice controls below
+            # the visible scroll area.
+            if local and not self._local_model_ready:
+                panel.grid()
+            else:
+                panel.grid_remove()
+        switch = getattr(self, "_provider_switch", None)
+        if switch is not None:
+            switch.configure(state="disabled" if self._busy else "normal")
+        button = getattr(self, "_btn_local_download", None)
+        if button is not None:
+            if self._local_download_state == "downloading":
+                button.configure(
+                    text=self._t("local_cancel_download"),
+                    state="normal",
+                    fg_color=self._c("danger"),
+                    hover_color=self._c("danger_hover"),
+                )
+            elif self._local_model_ready:
+                button.grid_remove()
+            else:
+                button.configure(
+                    text=self._t("local_download"),
+                    state="normal" if not self._busy else "disabled",
+                    fg_color=self._c("primary"),
+                    hover_color=self._c("primary_hover"),
+                )
+                button.grid()
+        label = getattr(self, "_local_status_label", None)
+        if label is not None:
+            label.configure(text=self._local_status_text())
+        combo = getattr(self, "_voice_combo", None)
+        if combo is not None and local:
+            combo.configure(
+                state="normal"
+            )
+        elif combo is not None:
+            combo.configure(state="normal")
+        pitch = getattr(self, "_pitch_slider", None)
+        if pitch is not None:
+            pitch.configure(state="disabled" if local else "normal")
+        lang_combo = getattr(self, "_lang_combo", None)
+        gender_combo = getattr(self, "_gender_combo", None)
+        if local:
+            if lang_combo is not None:
+                lang_combo.configure(state="disabled")
+            if gender_combo is not None:
+                gender_combo.configure(state="normal")
+        else:
+            if lang_combo is not None:
+                lang_combo.configure(state="normal")
+            if gender_combo is not None:
+                gender_combo.configure(state="normal")
+        self._update_timeline_availability()
+
+    def _update_timeline_availability(self):
+        local = self._voice_provider == PROVIDER_KOKORO
+        for check in (
+            getattr(self, "_timeline_check", None),
+            getattr(self, "_srt_check", None),
+        ):
+            if check is not None:
+                check.configure(state="disabled" if local else "normal")
+        if local:
+            self._clear_highlight()
+
+    def _toggle_local_model_download(self):
+        if self._local_download_state == "downloading":
+            self._local_download_cancel.set()
+            return
+        if self._local_model_ready:
+            return
+        size_mb = round(MODEL_SIZE / 1024 / 1024)
+        message = (
+            f"本地中文语音包约 {size_mb} MB，来源为开源模型 Kokoro v1.1-zh"
+            "（Apache-2.0）。\n\n安装包通常已内置该语音包；当前文件缺失时，"
+            "下载仅用于修复。现在下载吗？"
+            if self._language == "zh"
+            else f"The local Chinese voice pack is about {size_mb} MB, "
+            "provided by the open-source Kokoro v1.1-zh model (Apache-2.0).\n\n"
+            "The installer normally includes it; download only to repair a "
+            "missing copy. Continue?"
+        )
+        if not messagebox.askyesno(self._app_name(), message):
+            return
+        self._local_download_state = "downloading"
+        self._local_download_progress = 0
+        self._local_download_cancel = threading.Event()
+        self._local_status_label.configure(text=self._local_status_text())
+        self._update_provider_ui()
+        self._schedule_poll_ui(100)
+        threading.Thread(
+            target=self._local_model_download_worker,
+            args=(self._local_download_cancel,),
+            daemon=True,
+        ).start()
+
+    def _local_model_download_worker(self, cancel):
+        try:
+            base = download_model(
+                self._local_model_repair_dir,
+                cancel=cancel,
+                progress=lambda done, total: self._ui_q.put(
+                    ("local_download_progress", done, total)
+                ),
+            )
+            self._ui_q.put(("local_download_done", str(base), ""))
+        except InterruptedError:
+            self._ui_q.put(("local_download_done", "", "canceled"))
+        except Exception as exc:  # noqa: BLE001
+            self._ui_q.put(("local_download_done", "", str(exc)))
+
+    def _on_local_download_progress(self, done, total):
+        if self._local_download_state != "downloading":
+            return
+        self._local_download_progress = (
+            max(0, min(100, round(done / total * 100))) if total else 0
+        )
+        self._local_status_label.configure(text=self._local_status_text())
+
+    def _on_local_download_done(self, path, error):
+        self._local_download_state = "idle"
+        self._local_model_dir = resolved_model_directory(
+            self._local_model_repair_dir
+        )
+        self._local_model_ready = bool(path) and model_installed(self._local_model_dir)
+        if self._local_model_ready and self._local_download_cancel.is_set():
+            # A cancel can race the final rename; the model is valid now, so
+            # do not report a misleading canceled state.
+            error = ""
+        if self._local_model_ready:
+            self.log("[本地音色] 语音包已安装，8 个精选中文音色可用。")
+            if self._voice_provider == PROVIDER_KOKORO:
+                self._refresh_voice_selectors(
+                    preferred=self._selected_voice_code
+                )
+        elif error == "canceled":
+            self.log("[本地音色] 已取消语音包下载。")
+        else:
+            self.log(f"[本地音色] 语音包下载失败：{error[:240]}")
+            messagebox.showerror(
+                self._app_name(),
+                self._t("local_download_failed") + "：\n\n" + error[:500],
+            )
+        self._update_provider_ui()
+        self._update_voice_info()
+        self._sync_voice_preview_button()
 
     def _refresh_voice_fallback(self):
         """语音列表尚未加载/加载失败时：语言、性别、音色至少保留默认项，避免下拉为空。"""
@@ -1914,12 +3228,14 @@ class App(ctk.CTk):
         codes = [self._selected_voice_code] if self._selected_voice_code else []
         names = [self._display_name(c) for c in codes]
         self._voice_combo.configure(values=names)
+        self._voice_combo.set_state("normal")
         if names:
             self._voice_var.set(names[0])
         if self._voices_load_error:
             self._voice_info.configure(text=self._t("voices_load_error"), text_color="#f7768e")
         else:
             self._update_voice_info()
+        self._sync_voice_preview_button()
     def _apply_voices(self, voices, err):
         self._voices_load_error = err
         if err:
@@ -1927,23 +3243,246 @@ class App(ctk.CTk):
             self._refresh_voice_fallback()
             if self._btn_reload_voices:
                 self._btn_reload_voices.configure(state="normal")
+                self._btn_reload_voices.pack(
+                    side="left", padx=(0, 5), before=self._btn_restore_defaults
+                )
             return
-        self._voice_map = {v["ShortName"]: v for v in voices}
-        self._groups_engine = VoiceGroupingEngine(voices)
+        normalized = merge_voice_catalog(voices)
+        self._voice_map = {v["ShortName"]: v for v in normalized}
+        self._groups_engine = VoiceGroupingEngine(normalized)
         self._voice_alias_index.update(
             build_voice_alias_index(
-                voices,
+                normalized,
                 preferred_codes=(DEFAULT_VOICE, "en-US-AnaNeural", "da-DK-JeppeNeural", "en-NG-AbeoNeural"),
             )
         )
         count = len(self._voice_map)
         langs = len(self._groups_engine.languages())
-        self.log(f"[语音] 已加载 {count} 个可用语音（{langs} 种语言）")
+        zh_count = self._groups_engine.count("zh")
+        self.log(f"[语音] 已加载 {count} 个可用语音（{langs} 种语言，其中中文 {zh_count} 个）")
         if self._btn_reload_voices:
             self._btn_reload_voices.configure(state="disabled")
-        self._refresh_voice_selectors(preferred=DEFAULT_VOICE if self._selected_voice_code == DEFAULT_VOICE else None)
+            self._btn_reload_voices.pack_forget()
+        self._refresh_voice_selectors(
+            preferred=DEFAULT_VOICE
+            if self._selected_voice_code == DEFAULT_VOICE
+            else None
+        )
+        self._update_provider_ui()
         if self._file_batch_active:
             self._load_file_item_into_controls(self._selected_file_index)
+
+    def _sync_voice_preview_button(self):
+        button = getattr(self, "_btn_voice_preview", None)
+        if button is None:
+            return
+        try:
+            if self._voice_preview_state == "generating":
+                button.configure(
+                    text=self._t("voice_preview_generating"),
+                    state="disabled",
+                    fg_color=self._c("surface_alt"),
+                    hover_color=self._c("surface_alt"),
+                    text_color=self._c("muted"),
+                )
+            elif self._voice_preview_state == "playing":
+                button.configure(
+                    text=self._t("voice_preview_playing"),
+                    state="normal",
+                    fg_color=self._c("danger"),
+                    hover_color=self._c("danger_hover"),
+                    text_color="#FFFFFF",
+                )
+            else:
+                button.configure(
+                    text=self._t("voice_preview"),
+                    state=(
+                        "normal"
+                        if self._voice_provider == PROVIDER_KOKORO
+                        or self._voice_map
+                        else "disabled"
+                    ),
+                    fg_color=self._c("surface_alt"),
+                    hover_color=self._c("card_raised"),
+                    text_color=self._c("accent"),
+                )
+        except Exception:  # noqa: BLE001 - widget may be rebuilding
+            pass
+
+    def _toggle_voice_preview(self):
+        if self._voice_preview_state in ("generating", "playing"):
+            self._stop_voice_preview()
+            return
+        code = self._selected_voice()
+        if not code:
+            return
+        if self._voice_provider == PROVIDER_KOKORO:
+            if not self._local_model_ready:
+                self._voice_info.configure(
+                    text=self._t("local_not_installed"),
+                    text_color=self._c("warning"),
+                )
+                return
+            self._start_local_voice_preview(code)
+            return
+        if not self._voice_map:
+            self._voice_info.configure(
+                text=self._t("voices_load_error"), text_color=self._c("warning")
+            )
+            return
+        self._stop_playback()
+        self._voice_preview_code = code
+        self._voice_preview_state = "generating"
+        self._voice_preview_busy = True
+        self._voice_preview_cancel = threading.Event()
+        self._voice_preview_token += 1
+        token = self._voice_preview_token
+        self._sync_voice_preview_button()
+        self.log(f"[试听] 正在生成音色试听：{self._display_name(code)}")
+        self._schedule_poll_ui(100)
+        threading.Thread(
+            target=self._voice_preview_worker,
+            args=(token, code),
+            daemon=True,
+        ).start()
+
+    def _start_local_voice_preview(self, code: str):
+        self._stop_playback()
+        self._voice_preview_code = code
+        self._voice_preview_state = "generating"
+        self._voice_preview_busy = True
+        self._voice_preview_cancel = threading.Event()
+        self._voice_preview_token += 1
+        token = self._voice_preview_token
+        self._sync_voice_preview_button()
+        self.log(f"[试听] 正在本地生成音色试听：{self._display_name(code)}")
+        self._schedule_poll_ui(100)
+        threading.Thread(
+            target=self._local_voice_preview_worker,
+            args=(token, code),
+            daemon=True,
+        ).start()
+
+    def _local_voice_preview_worker(self, token: int, code: str):
+        try:
+            engine = LocalTTSEngine(
+                self._local_model_dir,
+                cancel_event=self._voice_preview_cancel,
+            )
+            engine.synthesize_to_mp3(
+                "你好，这是本地增强音色的试听。欢迎使用 Edge TTS 语音合成助手。",
+                code,
+                self._voice_preview_path,
+                rate="+0%",
+                volume="+0%",
+            )
+            result = {"status": "done"}
+        except InterruptedError:
+            result = {"status": "canceled"}
+        except Exception as exc:  # noqa: BLE001
+            result = {"status": "error", "error": str(exc)}
+        self._ui_q.put(("voice_preview_done", token, code, result))
+
+    def _voice_preview_worker(self, token: int, code: str):
+        cfg = TTSConfig(voice=code, rate="+0%", volume="+0%", pitch="+0Hz")
+        info = dict(self._voice_map.get(code) or {})
+        locale = info.get("EdgeLocale") or info.get("Locale") or ""
+        text = (
+            VOICE_PREVIEW_TEXT_ZH
+            if is_chinese_locale(locale) or is_multilingual_voice(code)
+            else VOICE_PREVIEW_TEXT_EN
+        )
+        try:
+            engine = TTSEngine(cancel_event=self._voice_preview_cancel)
+            result = engine.generate(text, self._voice_preview_path, cfg)
+            if result.get("status") == "done":
+                timeline = engine.timeline
+                if timeline:
+                    sentences = timeline.get("sentences") or []
+                    if sentences:
+                        result["preview_seconds"] = sentences[-1].get("end", 0)
+        except Exception as exc:  # noqa: BLE001
+            result = {"status": "error", "error": str(exc)}
+        self._ui_q.put(("voice_preview_done", token, code, result))
+
+    def _handle_voice_preview_done(self, token, code, result):
+        if token != self._voice_preview_token:
+            return
+        if result.get("status") == "canceled":
+            self._voice_preview_state = "idle"
+            self._voice_preview_busy = False
+            self._sync_voice_preview_button()
+            self._update_voice_info()
+            return
+        if result.get("status") != "done" or not os.path.exists(self._voice_preview_path):
+            self._voice_preview_state = "idle"
+            self._voice_preview_busy = False
+            self._sync_voice_preview_button()
+            error = str(result.get("error") or "")
+            self.log(f"[试听] 试听生成失败：{error[:200]}")
+            self._voice_info.configure(
+                text=self._t("voice_preview_failed"),
+                text_color=self._c("danger"),
+            )
+            return
+        self._play_audio(self._voice_preview_path)
+        if not (pygame.mixer.get_init() and pygame.mixer.music.get_busy()):
+            self._voice_preview_state = "idle"
+            self._voice_preview_busy = False
+            self._sync_voice_preview_button()
+            return
+        self._voice_preview_state = "playing"
+        self._voice_preview_busy = True
+        self._sync_voice_preview_button()
+        self._voice_info.configure(
+            text=self._t("voice_preview_playing"), text_color=self._c("accent")
+        )
+        self._schedule_poll_ui(100)
+        self._schedule_voice_preview_poll()
+
+    def _schedule_voice_preview_poll(self):
+        if self._voice_preview_poll_after is not None:
+            return
+        self._voice_preview_poll_after = self.after(
+            200, self._poll_voice_preview_state
+        )
+
+    def _poll_voice_preview_state(self):
+        self._voice_preview_poll_after = None
+        if self._voice_preview_state != "playing":
+            return
+        try:
+            busy = bool(pygame.mixer.get_init() and pygame.mixer.music.get_busy())
+        except Exception:  # noqa: BLE001
+            busy = False
+        if busy:
+            self._schedule_voice_preview_poll()
+        else:
+            self._voice_preview_state = "idle"
+            self._voice_preview_busy = False
+            self._sync_voice_preview_button()
+            self._update_voice_info()
+
+    def _stop_voice_preview(self):
+        self._voice_preview_token += 1
+        self._voice_preview_cancel.set()
+        if self._voice_preview_poll_after is not None:
+            try:
+                self.after_cancel(self._voice_preview_poll_after)
+            except tk.TclError:
+                pass
+            self._voice_preview_poll_after = None
+        if self._voice_preview_state in ("generating", "playing"):
+            try:
+                if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                    pygame.mixer.music.stop()
+                    pygame.mixer.music.unload()
+            except Exception:  # noqa: BLE001
+                pass
+        self._voice_preview_state = "idle"
+        self._voice_preview_busy = False
+        self._sync_voice_preview_button()
+        self._update_voice_info()
 
     # ============================================================ 文本
 
@@ -2057,8 +3596,8 @@ class App(ctk.CTk):
         if self._line_pause_section is not None:
             if mode == "line":
                 if self._sentence_pause_row is not None:
-                    self._sentence_pause_row.grid_configure(row=3)
-                self._line_pause_section.grid(row=2)
+                    self._sentence_pause_row.grid_configure(row=4)
+                self._line_pause_section.grid(row=3)
             else:
                 if self._sentence_pause_row is not None:
                     self._sentence_pause_row.grid_configure(row=2)
@@ -2077,6 +3616,25 @@ class App(ctk.CTk):
         self._srt_fill_check.configure(text=self._t("srt_fill_line_pause"))
         self._srt_fill_hint.configure(text=self._t("srt_fill_line_pause_hint"))
         self._update_srt_fill_visibility()
+        self._sync_mode_settings_visibility()
+
+    def _toggle_mode_settings(self):
+        self._mode_settings_expanded = not self._mode_settings_expanded
+        self._settings["advanced_settings_expanded"] = self._mode_settings_expanded
+        self._save_settings()
+        self._sync_mode_settings_visibility()
+
+    def _sync_mode_settings_visibility(self):
+        body = getattr(self, "_mode_settings_body", None)
+        button = getattr(self, "_mode_settings_expand", None)
+        if body is None or button is None:
+            return
+        if self._mode_settings_expanded:
+            body.grid()
+            button.configure(text=self._t("collapse"))
+        else:
+            body.grid_remove()
+            button.configure(text=self._t("expand"))
 
     def _on_prepare_lines(self):
         if self._busy or self._workflow_mode != "line":
@@ -2156,6 +3714,68 @@ class App(ctk.CTk):
             sentence_pause_marks=tuple(sorted(self._sentence_pause_marks)),
             line_pause_enabled=self._line_pause_enabled and self._workflow_mode == "line",
             line_pause_ms=self._line_pause_ms if self._line_pause_enabled and self._workflow_mode == "line" else 0,
+            provider=self._voice_provider,
+        )
+
+    def _uses_local_voice(self) -> bool:
+        return self._voice_provider == PROVIDER_KOKORO
+
+    def _local_warning(self) -> str:
+        return (
+            "本地增强音色不提供精准时间轴与 SRT 字幕，生成前已自动关闭。"
+            if self._language == "zh"
+            else "Precise timeline and SRT are unavailable for local voices and were turned off."
+        )
+
+    def _prepare_local_generation(self):
+        if not self._local_model_ready:
+            messagebox.showinfo(
+                self._app_name(),
+                (
+                    "本地中文语音包缺失，请重新安装完整版本或点击“下载修复语音包”。"
+                    if self._language == "zh"
+                    else "The local Chinese voice pack is missing. Reinstall "
+                    "the full version or use Repair voice pack."
+                ),
+            )
+            return False
+        if self._timeline_enabled or self._srt_enabled:
+            self._timeline_enabled = False
+            self._srt_enabled = False
+            if self._timeline_var is not None:
+                self._timeline_var.set(False)
+            if self._srt_var is not None:
+                self._srt_var.set(False)
+            self.log("[本地音色] " + self._local_warning())
+        return True
+
+    def _make_task_engine(
+        self,
+        cfg: TTSConfig,
+        *,
+        on_log=None,
+        on_progress=None,
+        label: str = "",
+    ):
+        """Create the provider-specific engine used by every task path."""
+        prefix = f"[{label}] " if label else ""
+
+        def log(message):
+            if on_log is not None:
+                on_log(prefix + message if label else message)
+
+        if cfg.provider == PROVIDER_KOKORO:
+            return LocalTaskEngine(
+                self._local_model_dir,
+                cancel_event=self._cancel_event,
+                on_log=log,
+                on_progress=on_progress,
+            )
+        return TTSEngine(
+            on_log=log,
+            on_progress=on_progress,
+            controller=self._make_controller(),
+            cancel_event=self._cancel_event,
         )
 
     def _start_task(self, text, output_path, mode):
@@ -2169,18 +3789,23 @@ class App(ctk.CTk):
         self._cancel_event = threading.Event()
         self._set_busy_ui(True)
 
-        controller = self._make_controller()
-        engine = TTSEngine(
+        cfg = self._build_cfg()
+        task = TTSTask(text, output_path, cfg, mode)
+
+        engine = self._make_task_engine(
+            cfg,
             on_log=lambda message: self._ui_q.put(("log", message)),
             on_progress=lambda percent, written: self._ui_q.put(
                 ("progress", percent, written)
             ),
-            controller=controller,
-            cancel_event=self._cancel_event,
         )
-        task = TTSTask(text, output_path, self._build_cfg(), mode)
 
-        self._status_label.configure(text="Preparing…" if self._language == "en" else "正在准备…", text_color="#e0af68")
+        preparing = (
+            self._t("local_generating")
+            if cfg.provider == PROVIDER_KOKORO
+            else ("Preparing…" if self._language == "en" else "正在准备…")
+        )
+        self._status_label.configure(text=preparing, text_color="#e0af68")
         self._progress.configure(mode="determinate")
         self._progress.set(0)
 
@@ -2188,7 +3813,7 @@ class App(ctk.CTk):
             target=self._worker_task, args=(engine, task), daemon=True
         ).start()
 
-    def _worker_task(self, engine: TTSEngine, task: TTSTask):
+    def _worker_task(self, engine, task: TTSTask):
         try:
             result = engine.generate(task.text, task.output_path, task.cfg)
         except Exception as exc:  # noqa: BLE001
@@ -2319,6 +3944,8 @@ class App(ctk.CTk):
     def _on_generate(self):
         if self._file_batch_active:
             self._on_generate_file_batch()
+            return
+        if self._uses_local_voice() and not self._prepare_local_generation():
             return
         self._on_pause_changed()
         cleaned = self._get_cleaned_text()
@@ -2671,6 +4298,7 @@ class App(ctk.CTk):
             sentence_pause_marks=tuple(sorted(self._sentence_pause_marks)),
             line_pause_enabled=False,
             line_pause_ms=0,
+            provider=self._voice_provider,
         )
 
     def _add_batch_files(self, paths):
@@ -2751,13 +4379,18 @@ class App(ctk.CTk):
         srt_fill_line_pause: bool,
     ):
         cfg = replace(cfg)
+        if cfg.provider == PROVIDER_KOKORO:
+            timeline_enabled = False
+            srt_enabled = False
+            srt_fill_line_pause = False
         if options.get("voice"):
             resolved, warning = resolve_voice_alias(
                 options["voice"],
                 self._voice_alias_index,
-                set(self._voice_map),
+                set(self._voice_map) | {voice.code for voice in LOCAL_VOICES},
             )
             cfg.voice = resolved
+            cfg.provider = provider_for_voice(resolved)
             if warning:
                 self.log(f"[批量] {warning}")
         if "sentence_pause_ms" in options:
@@ -2774,6 +4407,10 @@ class App(ctk.CTk):
             timeline_enabled = bool(options["timeline_enabled"])
         if "srt_enabled" in options:
             srt_enabled = bool(options["srt_enabled"])
+        if cfg.provider == PROVIDER_KOKORO:
+            timeline_enabled = False
+            srt_enabled = False
+            srt_fill_line_pause = False
         return cfg, timeline_enabled, srt_enabled, srt_fill_line_pause
 
     def _load_file_item_into_controls(self, index: int):
@@ -2783,16 +4420,29 @@ class App(ctk.CTk):
         self._loading_file_item = True
         try:
             code = item.cfg.voice
-            if code in self._voice_map:
-                info = self._voice_map.get(code) or {}
-                locale = str(info.get("Locale") or "")
-                language = locale.split("-", 1)[0].lower()
-                gender = str(info.get("Gender") or "")
-                if language:
-                    self._selected_lang = language
-                if gender:
-                    self._selected_gender = gender
-                self._refresh_voice_selectors(preferred=code)
+            if code in self._voice_map or is_local_voice(code):
+                provider = provider_for_voice(code)
+                if provider != self._voice_provider:
+                    self._voice_provider = provider
+                    self._sync_provider_name(provider)
+                if provider == PROVIDER_KOKORO:
+                    self._selected_voice_code = code
+                    self._selected_lang = "zh"
+                    selected = local_voice(code)
+                    self._selected_gender = (
+                        selected.gender if selected is not None else GENDER_ALL
+                    )
+                    self._refresh_voice_selectors(preferred=code)
+                else:
+                    info = self._voice_map.get(code) or {}
+                    locale = str(info.get("Locale") or "")
+                    language = locale.split("-", 1)[0].lower()
+                    gender = str(info.get("Gender") or "")
+                    if language:
+                        self._selected_lang = language
+                    if gender:
+                        self._selected_gender = gender
+                    self._refresh_voice_selectors(preferred=code)
             else:
                 self._selected_voice_code = code
                 self._voice_var.set(code)
@@ -2817,6 +4467,7 @@ class App(ctk.CTk):
             self._set_sentence_pause_controls_enabled(self._sentence_pause_enabled)
             self._set_line_pause_controls_enabled(self._line_pause_enabled)
             self._update_srt_fill_visibility()
+            self._update_provider_ui()
         finally:
             self._loading_file_item = False
         self._on_text_changed()
@@ -2851,11 +4502,16 @@ class App(ctk.CTk):
         )
         voice_value = self._voice_var.get()
         selected_voice = self._selected_voice_code or DEFAULT_VOICE
-        for code in list(self._voice_map):
+        for code in list(self._voice_map) + [voice.code for voice in LOCAL_VOICES]:
             if self._display_name(code) == voice_value:
                 selected_voice = code
                 break
         item.cfg.voice = selected_voice
+        item.cfg.provider = provider_for_voice(selected_voice)
+        if item.cfg.provider == PROVIDER_KOKORO:
+            item.timeline_enabled = False
+            item.srt_enabled = False
+            item.srt_fill_line_pause = False
         item.cfg.rate = f"{'+' if self._rate_var.get() >= 0 else ''}{self._rate_var.get()}%"
         item.cfg.volume = f"{'+' if self._volume_var.get() >= 0 else ''}{self._volume_var.get()}%"
         item.cfg.pitch = f"{'+' if self._pitch_var.get() >= 0 else ''}{self._pitch_var.get()}Hz"
@@ -2866,6 +4522,9 @@ class App(ctk.CTk):
         item.timeline_enabled = bool(self._timeline_var.get())
         item.srt_enabled = bool(self._srt_var.get())
         item.srt_fill_line_pause = False
+        if item.cfg.provider == PROVIDER_KOKORO:
+            item.timeline_enabled = False
+            item.srt_enabled = False
         current = (
             item.cfg.voice,
             item.cfg.rate,
@@ -3269,12 +4928,18 @@ class App(ctk.CTk):
             Page(page.index, page.text, page.note, page.title) for page in self._pages
         ]
         cfg = self._build_cfg()
+        if cfg.provider == PROVIDER_KOKORO and not self._prepare_local_generation():
+            return
         self._busy = True
         self._cancel_event = threading.Event()
         self._set_busy_ui(True)
         self._progress.configure(mode="determinate")
         self._progress.set(0)
-        self._status_label.configure(text=(f"Dubbing {unit}…" if self._language == "en" else "正在逐行配音…" if self._batch_mode == "line" else "正在逐页配音…"), text_color="#e0af68")
+        if cfg.provider == PROVIDER_KOKORO:
+            status = self._t("local_generating")
+        else:
+            status = f"Dubbing {unit}…" if self._language == "en" else "正在逐行配音…" if self._batch_mode == "line" else "正在逐页配音…"
+        self._status_label.configure(text=status, text_color="#e0af68")
         label = "逐行" if self._batch_mode == "line" else "分页"
         cn_unit = "行" if self._batch_mode == "line" else "页"
         self.log(f"[{label}] 开始{label}配音（共 {len(self._pages)} {cn_unit}）")
@@ -3318,14 +4983,12 @@ class App(ctk.CTk):
                 self._ui_q.put(("log", f"[{log_tag}] 第 {pos}/{total} {unit}无可用文字，已跳过。"))
                 return True
             output_path = os.path.join(batch_dir, f"{stem}_{pos:03d}.mp3")
-            controller = self._make_controller()
-            engine = TTSEngine(
+            engine = self._make_task_engine(
+                cfg,
                 on_log=lambda message: self._ui_q.put(("log", message)),
                 on_progress=lambda percent, written, pos=pos, total=total: self._ui_q.put(
                     ("progress", (pos - 1 + percent / 100.0) / total * 100, written, pos, total)
                 ),
-                controller=controller,
-                cancel_event=self._cancel_event,
             )
             result = engine.generate(text, output_path, cfg)
             if self._cancel_event.is_set():
@@ -3440,6 +5103,9 @@ class App(ctk.CTk):
     def _start_file_batch(self, targets: list[FileBatchItem]):
         if self._busy or not targets:
             return
+        if any(item.cfg.provider == PROVIDER_KOKORO for item in targets):
+            if not self._prepare_local_generation():
+                return
         self._on_pause_changed()
         self._capture_file_item_from_ui()
         self._stop_playback()
@@ -3537,9 +5203,9 @@ class App(ctk.CTk):
                     "display_name": display_name,
                 })
                 return True
-            controller = self._make_controller()
-            engine = TTSEngine(
-                on_log=lambda message: self._ui_q.put(("log", f"[{display_name}] {message}")),
+            engine = self._make_task_engine(
+                cfg,
+                on_log=lambda message: self._ui_q.put(("log", message)),
                 on_progress=lambda percent, written, pos=pos: self._ui_q.put(
                     (
                         "file_progress",
@@ -3549,8 +5215,7 @@ class App(ctk.CTk):
                         written,
                     )
                 ),
-                controller=controller,
-                cancel_event=self._cancel_event,
+                label=display_name,
             )
             try:
                 result = engine.generate(text, output, cfg)
@@ -3844,7 +5509,7 @@ class App(ctk.CTk):
                 self._generated_timeline = item.timeline
                 self._highlight_ranges = []
                 self._highlight_running = True
-                self.after(150, self._tick_highlight)
+                self._schedule_highlight_tick()
             return
         page_entry = self._current_page_generated()
         target = page_entry["audio"] if page_entry else self._generated_path
@@ -3865,7 +5530,7 @@ class App(ctk.CTk):
                 self._generated_timeline = timeline
                 self._highlight_ranges = self._build_highlight_ranges()
                 self._highlight_running = True
-                self.after(150, self._tick_highlight)
+                self._schedule_highlight_tick()
 
     def _open_result_preview_legacy(self):
         """Open a batch-aware review window for generated audio and subtitles."""
@@ -4221,11 +5886,10 @@ class App(ctk.CTk):
 
                 def file_worker():
                     try:
-                        engine = TTSEngine(
+                        engine = self._make_task_engine(
+                            cfg,
                             on_log=lambda msg: self._ui_q.put(("log", msg)),
                             on_progress=lambda p, w: None,
-                            controller=self._make_controller(),
-                            cancel_event=self._cancel_event,
                         )
                         result = engine.generate(item.text, output, cfg)
                         result["timeline"] = getattr(engine, "timeline", None)
@@ -4255,7 +5919,11 @@ class App(ctk.CTk):
             cfg = self._build_cfg()
             def worker():
                 try:
-                    engine = TTSEngine(on_log=lambda msg: self._ui_q.put(("log", msg)), on_progress=lambda p, w: None, controller=self._make_controller(), cancel_event=self._cancel_event)
+                    engine = self._make_task_engine(
+                        cfg,
+                        on_log=lambda msg: self._ui_q.put(("log", msg)),
+                        on_progress=lambda p, w: None,
+                    )
                     result = engine.generate(entry["text"], output, cfg)
                     result["timeline"] = getattr(engine, "timeline", None)
                     result["text"] = entry["text"]
@@ -4528,20 +6196,19 @@ class App(ctk.CTk):
 
     def _on_mode_settings_resize(self, event):
         """Reflow the subtitle hint so its text stays inside the panel."""
-        label = getattr(self, "_srt_fill_hint", None)
-        if label is None:
-            return
-        try:
-            current = int(float(label.cget("wraplength")))
-        except (TypeError, ValueError):
-            current = 0
         target = max(160, int(event.width) - 46)
-        if abs(current - target) <= 4:
-            return
-        try:
-            label.configure(wraplength=target)
-        except Exception:  # noqa: BLE001 - the panel may already be torn down
-            pass
+        for label in (
+            getattr(self, "_mode_settings_hint", None),
+            getattr(self, "_srt_fill_hint", None),
+        ):
+            if label is None:
+                continue
+            try:
+                current = int(float(label.cget("wraplength")))
+                if abs(current - target) > 4:
+                    label.configure(wraplength=target)
+            except Exception:  # noqa: BLE001 - the panel may already be torn down
+                pass
 
     def _toggle_sentence_pause(self):
         self._sentence_pause_enabled = bool(self._sentence_pause_check.get())
@@ -4788,6 +6455,7 @@ class App(ctk.CTk):
         return ranges
 
     def _tick_highlight(self):
+        self._highlight_after = None
         if not self._highlight_running:
             return
         try:
@@ -4813,10 +6481,25 @@ class App(ctk.CTk):
                         break
         except Exception:  # noqa: BLE001
             pass
-        self.after(150, self._tick_highlight)
+        if self._highlight_running and self._highlight_after is None:
+            self._highlight_after = self.after(150, self._tick_highlight)
+
+    def _schedule_highlight_tick(self):
+        if self._highlight_after is not None:
+            try:
+                self.after_cancel(self._highlight_after)
+            except tk.TclError:
+                pass
+        self._highlight_after = self.after(150, self._tick_highlight)
 
     def _clear_highlight(self):
         self._highlight_running = False
+        if self._highlight_after is not None:
+            try:
+                self.after_cancel(self._highlight_after)
+            except tk.TclError:
+                pass
+            self._highlight_after = None
         try:
             self._textbox.tag_remove("highlight_sentence", "1.0", "end")
         except Exception:  # noqa: BLE001
@@ -5631,6 +7314,15 @@ class App(ctk.CTk):
         line = f"[{timestamp}] {self._localized_log_message(message)}\n"
         self._log.configure(state="normal")
         self._log.insert("end", line)
+        # Tk text widgets get slower with every appended line. Keep only the
+        # newest entries so long batch runs stay responsive.
+        try:
+            line_count = int(self._log.index("end-1c").split(".")[0])
+            overflow = line_count - LOG_MAX_LINES
+            if overflow > 0:
+                self._log.delete("1.0", f"{overflow + 1}.0")
+        except (tk.TclError, ValueError):
+            pass
         self._log.see("end")
         self._log.configure(state="disabled")
 
@@ -5710,12 +7402,15 @@ class App(ctk.CTk):
     def _on_close(self):
         self._persist_ui_settings()
         self._cancel_event.set()
+        self._stop_voice_preview()
         self._stop_playback()
         self._cleanup_batch()
         self._cleanup_file_batch()
         try:
             if os.path.exists(self._preview_path):
                 os.unlink(self._preview_path)
+            if os.path.exists(self._voice_preview_path):
+                os.unlink(self._voice_preview_path)
         except OSError:
             pass
         self.destroy()
@@ -5725,11 +7420,14 @@ class App(ctk.CTk):
         try:
             self._settings["ui_language"] = self._language
             self._settings["voice"] = self._selected_voice()
+            self._settings["voice_provider"] = self._voice_provider
             self._settings["voice_lang"] = self._selected_lang
             self._settings["voice_gender"] = self._selected_gender
             self._settings["rate"] = int(self._rate_var.get())
             self._settings["volume"] = int(self._volume_var.get())
             self._settings["pitch"] = int(self._pitch_var.get())
+            self._settings["voice_favorites"] = list(self._favorites)
+            self._settings["panel_width"] = int(self._deck_width)
         except Exception:
             return
         self._save_settings()

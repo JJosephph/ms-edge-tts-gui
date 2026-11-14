@@ -30,13 +30,17 @@ echo Running tests...
 ".venv\Scripts\python.exe" -m unittest discover -s tests -v
 if errorlevel 1 exit /b 1
 
+ echo Preparing bundled Chinese voice model...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\prepare_model.ps1"
+if errorlevel 1 exit /b 1
+
  echo Building application directory...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "EdgeTTSGui" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --name "EdgeTTSGui" --icon "assets\app.ico" --add-data "assets\app.ico;assets" --add-data "vendor\models\kokoro-v1.1-zh;models\kokoro-v1.1-zh" --collect-all tkinterdnd2 --collect-all sherpa_onnx --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 if errorlevel 1 exit /b 1
 if not exist "dist\EdgeTTSGui\EdgeTTSGui.exe" exit /b 1
 
  echo Building portable executable...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name "EdgeTTSGui-Portable" --icon "assets\app.ico" --collect-all tkinterdnd2 --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name "EdgeTTSGui-Portable" --icon "assets\app.ico" --add-data "assets\app.ico;assets" --collect-all tkinterdnd2 --collect-all sherpa_onnx --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 if errorlevel 1 exit /b 1
 if not exist "dist\EdgeTTSGui-Portable.exe" exit /b 1
 

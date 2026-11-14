@@ -33,6 +33,16 @@ jobs:
       - name: 运行测试
         run: python -m unittest discover -s tests -v
 
+      - name: 缓存中文语音包
+        uses: actions/cache@v4
+        with:
+          path: build-assets/kokoro-int8-multi-lang-v1_1.tar.bz2
+          key: kokoro-v1.1-zh-259c9c8bc906d6078e4e0570421885dabb68b539c2f970fcbb890a58eeaf3e9c
+
+      - name: 准备内置中文语音包
+        shell: pwsh
+        run: ./scripts/prepare_model.ps1
+
       - name: 生成版本信息
         shell: bash
         run: |
@@ -41,10 +51,10 @@ jobs:
           sed -i "s/APP_VERSION = .*/APP_VERSION = \"$VERSION\"/" app.py
 
       - name: PyInstaller 打包（目录版，供安装器使用）
-        run: pyinstaller --noconfirm --clean --onedir --windowed --name EdgeTTSGui --icon assets/app.ico --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+        run: pyinstaller --noconfirm --clean --onedir --windowed --name EdgeTTSGui --icon assets/app.ico --add-data "assets/app.ico;assets" --add-data "vendor/models/kokoro-v1.1-zh;models/kokoro-v1.1-zh" --collect-all tkinterdnd2 --collect-all sherpa_onnx --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 
       - name: PyInstaller 打包（便携单文件版）
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name EdgeTTSGui-Portable --icon assets/app.ico --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name EdgeTTSGui-Portable --icon assets/app.ico --add-data "assets/app.ico;assets" --collect-all tkinterdnd2 --collect-all sherpa_onnx --hidden-import docx --hidden-import pypdf --hidden-import miniaudio --hidden-import lameenc --hidden-import cffi --hidden-import _cffi_backend app.py
 
       - name: 安装 Inno Setup
         run: choco install innosetup -y --no-progress

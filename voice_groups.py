@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from voice_catalog import merge_voice_catalog
+
 
 GENDER_FEMALE = "Female"
 GENDER_MALE = "Male"
@@ -25,14 +27,22 @@ class VoiceGroupingEngine:
 
     def __init__(self, voices: List[dict]):
         self._groups: Dict[str, Dict[str, List[dict]]] = {}
-        for voice in voices:
-            locale = (voice.get("Locale") or "").split("-")[0].lower()
-            if not locale:
-                continue
-            gender = voice.get("Gender") or GENDER_OTHER
-            if gender not in (GENDER_FEMALE, GENDER_MALE, GENDER_OTHER):
-                gender = GENDER_OTHER
-            self._groups.setdefault(locale, {}).setdefault(gender, []).append(voice)
+        self._by_code: Dict[str, dict] = {}
+        for voice in merge_voice_catalog(voices):
+            code = voice.get("ShortName")
+            if code:
+                self._by_code[code] = voice
+            groups = voice.get("VoiceGroups") or []
+            if not groups:
+                locale = (voice.get("EdgeLocale") or voice.get("Locale") or "")
+                groups = [locale.split("-")[0].lower()]
+            for locale in groups:
+                if not locale:
+                    continue
+                gender = voice.get("Gender") or GENDER_OTHER
+                if gender not in (GENDER_FEMALE, GENDER_MALE, GENDER_OTHER):
+                    gender = GENDER_OTHER
+                self._groups.setdefault(locale, {}).setdefault(gender, []).append(voice)
         for lang in self._groups:
             for gender in self._groups[lang]:
                 self._groups[lang][gender].sort(
@@ -63,6 +73,8 @@ class VoiceGroupingEngine:
 
     def find(self, code: str) -> Optional[dict]:
         """按 ShortName 查找语音（用于反查当前选择）。"""
+        if code in self._by_code:
+            return self._by_code[code]
         for lang in self._groups:
             for gender in self._groups[lang]:
                 for voice in self._groups[lang][gender]:
